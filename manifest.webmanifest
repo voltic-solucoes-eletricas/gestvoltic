@@ -1,0 +1,15 @@
+{
+  "name": "GestVoltic",
+  "short_name": "GestVoltic",
+  "description": "Propostas, clientes, avisos, catálogo, ferramentas e anotações da Voltic — sem depender do PC.",
+  "lang": "pt-PT",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#eef3f6",
+  "theme_color": "#0e6b8c",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
