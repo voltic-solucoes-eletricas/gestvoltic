@@ -1,10 +1,11 @@
 /* GestVoltic no telemóvel e no tablet (v147). Funciona sem o PC e sem rede.
    Dados: o Voltic_movel.json que o programa do PC grava na pasta do OneDrive; aqui escolhe-se esse ficheiro em «Atualizar».
    Tudo fica guardado SÓ neste aparelho, cifrado com o PIN (AES-GCM; chave PBKDF2 do PIN). Nada é enviado para lado nenhum:
-   as anotações saem só quando o Jorge carrega em «Guardar anotações» e escolhe a pasta do OneDrive. */
+   as anotações saem só quando o Jorge carrega em «Guardar anotações» e escolhe a pasta do OneDrive.
+   v207: dados da nota nos campos, escrita à mão, análise (proposta, agenda, tarefa), impressão digital e aviso de versão nova. */
 (() => {
   'use strict';
-  const VERSAO = '164.1';
+  const VERSAO = '207';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const eur = v => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
@@ -78,24 +79,28 @@
   }
   function pedirPin(meta) {
     raiz().innerHTML = '<div class="centro cartao"><h2>GestVoltic</h2><p>PIN</p><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus>' +
-      '<p class="erro" id="er"></p><button class="btn" id="ok">Entrar</button></div>';
-    const vai = async () => {
-      if (Date.now() < esperaAte) return $('#er').textContent = 'Espere ' + Math.ceil((esperaAte - Date.now()) / 1000) + ' s.';
-      try {
-        CHAVE = await derivar($('#pin').value, meta.sal);
-        const t = await decifrar(meta.teste);
-        if (t.ok !== 'gestvoltic') throw new Error();
-      } catch (_) {
-        CHAVE = null; falhas++; if (falhas >= 5) { esperaAte = Date.now() + 30000; falhas = 0; }
-        $('#pin').value = ''; return $('#er').textContent = 'PIN errado.';
-      }
+      '<p class="erro" id="er"></p><button class="btn" id="ok">Entrar</button>' + (meta.bio ? '<p></p><button class="btn sec" id="bio">👆 Entrar com impressão digital</button>' : '') + '<p class="nota">Versão ' + h(VERSAO) + '</p></div>';
+    const entra = async pin => { CHAVE = await derivar(pin, meta.sal); const t = await decifrar(meta.teste); if (t.ok !== 'gestvoltic') throw new Error(); };
+    const abre = async () => {
       try { const x = await ler('dados'); D = x ? await decifrar(x) : null; } catch (_) { D = null; }
       try { const x = await ler('notas'); N = x ? await decifrar(x) : []; } catch (_) { N = []; }
       try { const x = await ler('tecnico'); TEC = x ? await decifrar(x) : ''; } catch (_) { TEC = ''; }
       principal();
     };
+    const vai = async () => {
+      if (Date.now() < esperaAte) return $('#er').textContent = 'Espere ' + Math.ceil((esperaAte - Date.now()) / 1000) + ' s.';
+      try { await entra($('#pin').value); } catch (_) {
+        CHAVE = null; falhas++; if (falhas >= 5) { esperaAte = Date.now() + 30000; falhas = 0; }
+        $('#pin').value = ''; return $('#er').textContent = 'PIN errado.';
+      }
+      await abre();
+    };
     $('#ok').onclick = vai;
     $('#pin').onkeydown = e => { if (e.key === 'Enter') vai(); };
+    if (meta.bio) $('#bio').onclick = async () => {   /* v207 */
+      try { await entra(await bioPin(meta.bio)); } catch (err) { CHAVE = null; return $('#er').textContent = err && err.name === 'NotAllowedError' ? 'Cancelado. Pode usar o PIN.' : (err && err.message) || 'Não foi possível. Use o PIN.'; }
+      await abre();
+    };
   }
   // bloqueia ao fim de 5 minutos fora da aplicação
   let escondidoEm = 0;
@@ -103,6 +108,7 @@
     if (document.hidden) escondidoEm = Date.now();
     else if (emCamara) emCamara = false; // v164: voltar da câmara ou da galeria não bloqueia
     else if (CHAVE && escondidoEm && Date.now() - escondidoEm > 5 * 60 * 1000) { CHAVE = null; D = null; N = []; pedirPin(await ler('meta')); }
+    else if (CHAVE) verVersao();   // v207
   });
 
   /* ---------------------------------------------------------------- estrutura */
@@ -116,6 +122,7 @@
     $('#fich').onchange = carregarFicheiro;
     desenhar();
     verPartilhas();
+    verVersao();   // v207
   }
   async function carregarFicheiro(ev) {
     const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
@@ -260,7 +267,7 @@
 
   /* ---------------------------------------------------------------- ferramentas */
   function vFerramentas(m) {
-    m.innerHTML = '<div class="filtros"><button data-t="calc" class="on">Cálculos elétricos</button><button data-t="ve">Carregamento VE</button></div><div id="ferr" class="cartao"></div>';
+    m.innerHTML = '<div class="cartao" id="seg"></div><div class="filtros"><button data-t="calc" class="on">Cálculos elétricos</button><button data-t="ve">Carregamento VE</button></div><div id="ferr" class="cartao"></div>';
     const abre = t => {
       m.querySelectorAll('[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t));
       const el = document.createElement('div'); const box = $('#ferr'); box.innerHTML = ''; box.append(el);
@@ -270,6 +277,7 @@
     };
     m.onclick = e => { const b = e.target.closest('[data-t]'); if (b) abre(b.dataset.t); };
     abre('calc');
+    cartaoSeg($('#seg'));   // v207
   }
 
   /* ---------------------------------------------------------------- anotações */
@@ -285,12 +293,13 @@
     const porGuardar = N.filter(n => !n.guardadaEm || n.alterada > n.guardadaEm);
     m.innerHTML = '<p class="linha">' + (FILA ? '<button class="btn" data-recebidas>📥 Fotografias recebidas (' + FILA + ')</button>' : '') + '<button class="btn" data-voz>🎤 Nota por voz</button><button class="btn" data-nova>+ Nova anotação</button><button class="btn sec" data-guardar' + (porGuardar.length ? '' : ' disabled') + '>⤴ Guardar anotações (' + porGuardar.length + ')</button></p>' +
       '<p class="nota">«Guardar anotações» cria um ficheiro: escolha <b>OneDrive</b> e a pasta <b>GestVoltic_movel › anotacoes</b>. O PC mostra-as em Configurações › Telemóvel e tablet.</p>' +
-      blocoPC() + (N.length ? '<ul class="lista">' + N.slice().sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
+      tarefasHtml() + blocoPC() + (N.length ? '<ul class="lista">' + N.slice().sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
         '<li class="toque" data-nota="' + h(n.id) + '"><div class="t">' + (n.ref ? h(n.ref) + ' · ' : '') + h(n.assunto || n.nome || 'Anotação') + '</div><div class="s">' + h(quando(n.criada)) +
         (n.telefone ? ' · ' + h(n.telefone) : '') + (n.desenho ? ' · ✏️' : '') + (n.fotos?.length ? ' · 📷' + n.fotos.length : '') + '</div><div>' +
-        (!n.guardadaEm ? '<span class="chip am">por guardar</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — por guardar</span>' : '<span class="chip ok">guardada ' + h(quando(n.guardadaEm)) + '</span>') + '</div></li>').join('') + '</ul>'
+        (!n.guardadaEm ? '<span class="chip am">por guardar</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — por guardar</span>' : '<span class="chip ok">guardada ' + h(quando(n.guardadaEm)) + '</span>') + chipAnalise(n) + '</div></li>').join('') + '</ul>'
         : '<div class="cartao"><p>Ainda sem anotações. Use «+ Nova anotação» numa visita, ou abra uma proposta e carregue em «Anotar nesta proposta».</p></div>');
     m.onclick = e => {
+      const fe = e.target.closest('[data-feita]'); if (fe) return marcarFeita(fe.dataset.feita, fe.checked);   // v207
       if (e.target.closest('[data-recebidas]')) return abrirRecebidas();
       if (e.target.closest('[data-voz]')) return editarRapida(novaRapida(), true);
       if (e.target.closest('[data-nova]')) return editarNota(novaNota(null));
@@ -300,11 +309,176 @@
   }
   /* v157: nota rápida e por voz */
   const Reconhecer = window.SpeechRecognition || window.webkitSpeechRecognition;
-  function novaRapida() { return Object.assign(novaNota(null), { tipoNota: 'nota', voz: false, titulo: '', estado: 'pendente', responsavel: '', prazo: '', cliente: '', fornecedor: '' }); }
+  function novaRapida() { return Object.assign(novaNota(null), { tipoNota: 'nota', voz: false, titulo: '', estado: 'pendente', responsavel: '', prazo: '', cliente: '', fornecedor: '', analise: { tipo: '', prioridade: 'Normal', inicio: '', feita: false } }); }
   function blocoPC() {
-    const L = (D && D.notas) || [];
+    const L = ((D && D.notas) || []).filter(n => !n.tarefa && !N.some(y => y.id === n.origemId));   // v207: tarefas à parte; as minhas já estão na lista
     return L.length ? '<div class="cartao"><h3>Assuntos a tratar no PC (' + L.length + ')</h3><ul class="lista">' + L.map(n => '<li><div class="t">' + h(n.titulo) + (n.voz ? ' 🎤' : '') + '</div>' + (n.descricao && n.descricao !== n.titulo ? '<div>' + h(String(n.descricao).slice(0, 160)) + '</div>' : '') + '<div class="s">' + h(n.estado === 'em análise' ? 'Em análise' : 'Pendente') + ' · ' + h(n.ligacao || 'Avulsa') + (n.responsavel ? ' · ' + h(n.responsavel) : '') + (n.prazo ? ' · Prazo ' + h(dpt(n.prazo)) : '') + '</div></li>').join('') + '</ul></div>' : '';
   }
+  /* ---------------------------------------------------------------- v207: dados do texto, escrita à mão e análise da nota */
+  document.head.insertAdjacentHTML('beforeend', '<style>input.novo{background:#fff4d6}input[type=datetime-local]{width:100%;padding:10px;border:1px solid #9fb3bf;border-radius:10px;background:#fff;font-size:16px}details>summary{cursor:pointer;padding:4px 0}#nv{position:sticky;top:0;z-index:6;margin:0;border-radius:0}</style>');
+  const TEL = /(?<!\d)(?:\+?351[ .-]?)?(2\d{2}|9[1236]\d)[ .-]?(\d{3})[ .-]?(\d{3})(?!\d)/g, FISCAL = /(?:nif|nipc|contribuinte|contrib)[^a-z0-9]{0,4}$/i;
+  const RUA = /(?:^|[\s,;/–-])((?:rua|av\.|avenida|travessa|tv\.|praceta|largo|alameda|estrada|calçada|urbanização|urb\.|praça|lugar)(?=[\s.,]|$)\s*\S[^\n]*)/i;
+  const CP = /(?<![\d-])(\d{4})[-–\s](\d{3})(?![\d-])\s*([^\n,]*)/;
+  const MAI = 'A-ZÁÂÃÀÉÊÍÓÔÕÚÇ', MIN = 'a-záâãàéêíóôõúç';
+  const NOME = new RegExp('(?:^|[\\s,.;:(])(?:(?:[Nn]ome|[Cc]liente|[Cc]ontacto|[Ff]alar com|[Ss]ra|[Ss]r|[Ss]enhora|[Ss]enhor|[Dd]ona|[Ee]ngenheira|[Ee]ngenheiro|[Ee]ng|[Aa]rquiteta|[Aa]rquiteto|[Aa]rq)\\.?[\\s:]+)+(?!(?:Sra?|Senhora?|Dona|Eng|Arq)\\b)([' + MAI + '][' + MIN + ']+(?:\\s+(?:d[aeo]s?\\s+|e\\s+)?[' + MAI + '][' + MIN + ']+){0,4})');
+  function dadosTexto(t) {
+    t = String(t || '');
+    const m = [...t.matchAll(TEL)].find(x => !FISCAL.test(t.slice(Math.max(0, x.index - 16), x.index)));
+    const r = t.match(RUA), c = t.match(CP), nm = t.match(NOME);
+    const limpa = s => String(s || '').replace(/[\w.+-]+@\S+/g, ' ').replace(TEL, ' ').replace(/[,;]?\s*(?:falar com|nome|contacto|cliente|sr\.|sra\.|senhora?|dona)(?=[\s:]).*$/i, '')
+      .replace(/\b(?:tel|telef|telefone|telemóvel|telemovel|telm|tlm|email|e-mail|nif|nipc)\b.*$/i, '').replace(/[\s:;.,–-]+$/, '').trim();
+    return { nome: nm ? nm[1] : '', telefone: m ? m[1] + ' ' + m[2] + ' ' + m[3] : '', email: (t.match(/[\w.+-]+@[\w-]+\.[\w.-]+/) || [''])[0].replace(/[.,;]+$/, ''),
+      morada: r ? limpa(r[1].replace(CP, '')) : '', codigoPostal: c ? c[1] + '-' + c[2] : '', localidade: c ? limpa(c[3]) : '' };
+  }
+  const ROTC = { nome: 'nome', telefone: 'telefone', email: 'email', morada: 'morada', codigoPostal: 'código postal', localidade: 'localidade', cliente: 'cliente' };
+  function retirar(n, m, auto) {
+    const tx = m.querySelector('[data-k="texto"]'), ti = m.querySelector('[data-k="titulo"]');
+    const t = [ti ? ti.value : '', tx ? tx.value : ''].filter(Boolean).join('\n');
+    const d = dadosTexto(t), feitos = [];
+    const cl = m.querySelector('[data-k="cliente"]');
+    if (cl && !cl.value.trim() && D) {
+      const st = sem(t), c = (D.clientes || []).filter(x => sem(x.name).length >= 5 && st.includes(sem(x.name))).sort((a, b) => b.name.length - a.name.length)[0];
+      if (c) d.cliente = c.name;
+    }
+    for (const [k, v] of Object.entries(d)) { const el = m.querySelector('[data-k="' + k + '"]'); if (el && v && !el.value.trim()) { el.value = v; el.classList.add('novo'); feitos.push(ROTC[k]); } }
+    if (feitos.length) { const det = m.querySelector('#ctd'); if (det) det.open = true; }
+    return feitos.length ? 'Preenchi a partir do texto: ' + feitos.join(', ') + '.' : (auto ? '' : 'Não encontrei dados novos no texto (os campos já preenchidos não mudam).');
+  }
+  const cK = (n, k, rot, tipo = 'text', extra = '') => '<label class="campo"><span>' + rot + '</span><input data-k="' + k + '" type="' + tipo + '" value="' + h(n[k]) + '" ' + extra + '></label>';
+  function contactoHtml(n) {
+    const tem = ['nome', 'telefone', 'email', 'morada', 'codigoPostal', 'localidade'].some(k => n[k]);
+    return '<details class="cartao" id="ctd"' + (tem ? ' open' : '') + '><summary><b>Contacto e morada</b></summary><p class="linha"><button class="btn sec peq" data-retirar>🔎 Retirar dados do texto</button></p>' +
+      cK(n, 'nome', 'Nome do contacto') + cK(n, 'telefone', 'Telefone', 'tel') + cK(n, 'email', 'Email', 'text', 'inputmode="email"') + cK(n, 'morada', 'Morada') +
+      '<div class="linha"><div style="flex:1;min-width:120px">' + cK(n, 'codigoPostal', 'Código postal') + '</div><div style="flex:2;min-width:160px">' + cK(n, 'localidade', 'Localidade') + '</div></div>' +
+      '<p class="nota">Telefone: fixo 2xx ou móvel 91, 92, 93 ou 96. Números depois de NIF ou NIPC não contam.</p></details>';
+  }
+  const vazioC = cv => !cv.width || !cv.height || vazio(cv);
+  function maoHtml(n) { return '<details id="mao"' + (n.desenho ? ' open' : '') + '><summary><b>✍ Escrever à mão</b></summary><canvas class="desenho" id="cvr" style="height:260px"></canvas><p class="linha"><button class="btn sec peq" data-limparmao>Limpar</button><span class="nota">Escreva com a caneta ou o dedo.</span></p></details>'; }
+  function maoLigar(m, n) {
+    const cv = m.querySelector('#cvr'), ctx = cv.getContext('2d');
+    let mexeu = false, traco = false, limpo = false;
+    const ajusta = () => {
+      const r = cv.getBoundingClientRect(); if (!r.width) return;
+      const k = window.devicePixelRatio || 1; cv.width = Math.round(r.width * k); cv.height = Math.round(r.height * k);
+      ctx.setTransform(k, 0, 0, k, 0, 0); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, r.width, r.height);
+      if (n.desenho && !limpo && !mexeu) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, r.width, r.height); im.src = n.desenho; }
+    };
+    m.querySelector('#mao').addEventListener('toggle', () => { if (!mexeu) ajusta(); });
+    ajusta();
+    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    cv.onpointerdown = e => { traco = true; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineWidth = e.pointerType === 'pen' ? Math.max(1.2, (e.pressure || .5) * 3.2) : 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; };
+    cv.onpointermove = e => { if (!traco) return; const [x, y] = pos(e); if (e.pointerType === 'pen') ctx.lineWidth = Math.max(1.2, (e.pressure || .5) * 3.2); ctx.lineTo(x, y); ctx.stroke(); mexeu = true; };
+    cv.onpointerup = cv.onpointercancel = () => { traco = false; };
+    m.querySelector('[data-limparmao]').onclick = () => { limpo = true; mexeu = true; ajusta(); };
+    return { mexeu: () => mexeu, url: () => vazioC(cv) ? '' : cv.toDataURL('image/png'), tem: () => mexeu ? !vazioC(cv) : !!n.desenho };
+  }
+  const PRIO = ['Urgente', 'Elevada', 'Normal'];
+  function analiseHtml(n) {
+    const a = n.analise || {};
+    const op = (v, t) => '<option value="' + v + '"' + (v === (a.tipo || '') ? ' selected' : '') + '>' + t + '</option>';
+    return '<div class="cartao" style="background:#f4f8fb"><h3>Depois de analisar</h3><label class="campo"><span>O que fazer com esta nota</span><select data-a="tipo">' +
+      op('', 'Ainda por decidir') + op('proposta', 'Criar proposta comercial (no PC)') + op('agenda', 'Marcar na agenda (no PC)') + op('tarefa', 'Tarefa a fazer') + '</select></label>' +
+      '<div data-av="tarefa"><label class="campo"><span>Prioridade</span><select data-a="prioridade">' + PRIO.map(p => '<option' + (p === (a.prioridade || 'Normal') ? ' selected' : '') + '>' + p + '</option>').join('') + '</select></label>' +
+      '<label class="campo" style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-a="feita"' + (a.feita ? ' checked' : '') + ' style="width:22px;height:22px"> Feita</label></div>' +
+      '<div data-av="agenda"><label class="campo"><span>Data e hora</span><input type="datetime-local" data-a="inicio" value="' + h(a.inicio || '') + '"></label></div>' +
+      '<p class="nota" data-av="proposta agenda">O PC mostra o pedido nesta nota; a proposta ou a marcação só ficam criadas quando as confirmar lá.</p></div>';
+  }
+  function ligarAnalise(m) {
+    const s = m.querySelector('[data-a="tipo"]');
+    const mostra = () => m.querySelectorAll('[data-av]').forEach(x => { x.hidden = !x.dataset.av.split(' ').includes(s.value); });
+    s.onchange = mostra; mostra();
+  }
+  function lerAnalise(m, n) {
+    const g = k => m.querySelector('[data-a="' + k + '"]'), tipo = g('tipo').value, ant = n.analise || {};
+    const feita = tipo === 'tarefa' && g('feita').checked;
+    return { tipo, prioridade: g('prioridade').value, inicio: tipo === 'agenda' ? g('inicio').value : '', feita, feitaEm: feita ? (ant.feita && ant.feitaEm ? ant.feitaEm : new Date().toISOString()) : '' };
+  }
+  const corP = p => p === 'Urgente' ? 'mau' : p === 'Elevada' ? 'am' : '';
+  const chipAnalise = n => {
+    const a = n.analise || {};
+    if (a.tipo === 'tarefa') return ' <span class="chip ' + (a.feita ? 'ok' : corP(a.prioridade)) + '">' + (a.feita ? 'tarefa feita' : 'tarefa ' + h(a.prioridade)) + '</span>';
+    if (a.tipo === 'proposta') return ' <span class="chip">pedido ao PC: proposta</span>';
+    if (a.tipo === 'agenda') return ' <span class="chip">pedido ao PC: agenda ' + h(quando(a.inicio)) + '</span>';
+    return '';
+  };
+  function tarefasHtml() {
+    const ord = (a, b) => PRIO.indexOf(a.p) - PRIO.indexOf(b.p) || String(a.prazo || '9').localeCompare(String(b.prazo || '9'));
+    const T = N.filter(n => n.analise && n.analise.tipo === 'tarefa' && !n.analise.feita).map(n => ({ n, p: n.analise.prioridade, prazo: n.prazo }));
+    const P = ((D && D.notas) || []).filter(x => x.tarefa && !x.tarefa.feita && !N.some(y => y.id === x.origemId)).map(x => ({ x, p: x.tarefa.prioridade, prazo: x.prazo }));
+    const L = [...T, ...P].sort(ord);
+    if (!L.length) return '';
+    return '<div class="cartao"><h3>Tarefas (' + L.length + ')</h3><ul class="lista">' + L.map(o => o.n
+      ? '<li><label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" data-feita="' + h(o.n.id) + '" style="width:22px;height:22px;margin-top:2px;flex:none"><span><span class="chip ' + corP(o.p) + '">' + h(o.p) + '</span> <b>' + h(o.n.assunto || o.n.titulo || 'Nota') + '</b>' + (o.prazo ? '<br><span class="s">Prazo ' + h(dpt(o.prazo)) + '</span>' : '') + '</span></label></li>'
+      : '<li><span class="chip ' + corP(o.p) + '">' + h(o.p) + '</span> <b>' + h(o.x.titulo) + '</b><div class="s">Do PC' + (o.prazo ? ' · Prazo ' + h(dpt(o.prazo)) : '') + ' · marca-se como feita no PC</div></li>').join('') + '</ul></div>';
+  }
+  async function marcarFeita(id, v) {
+    const n = N.find(x => x.id === id); if (!n || !n.analise) return;
+    n.analise.feita = v; n.analise.feitaEm = v ? new Date().toISOString() : ''; n.alterada = new Date().toISOString();
+    await guardarNotas(); desenhar();
+  }
+
+  /* ---------------------------------------------------------------- v207: impressão digital (WebAuthn com PRF) e versão nova */
+  /* O PIN fica cifrado com uma chave que só a impressão digital (ou o bloqueio de ecrã) deste aparelho liberta. O PIN continua sempre a funcionar. */
+  const PRFSAL = enc.encode('GestVoltic-impressao-digital-v207');
+  async function chaveBio(credId) {
+    const r = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: 'public-key', id: credId }], userVerification: 'required', timeout: 60000, extensions: { prf: { eval: { first: PRFSAL } } } } });
+    const out = r && r.getClientExtensionResults && r.getClientExtensionResults().prf && r.getClientExtensionResults().prf.results && r.getClientExtensionResults().prf.results.first;
+    if (!out) throw new Error('Este aparelho não dá a chave da impressão digital a páginas (PRF). Continue com o PIN.');
+    return crypto.subtle.importKey('raw', out, 'AES-GCM', false, ['encrypt', 'decrypt']);
+  }
+  async function bioPin(bio) {
+    const k = await chaveBio(bio.id);
+    try { return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bio.iv }, k, bio.c)); } catch (_) { throw new Error('A impressão digital não abriu o cofre. Entre com o PIN.'); }
+  }
+  async function ativarBio(pin) {
+    if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) throw new Error('Este navegador não deixa usar a impressão digital em páginas.');
+    if (PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable && !(await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable())) throw new Error('Este aparelho não tem impressão digital nem bloqueio de ecrã configurado.');
+    const cred = await navigator.credentials.create({ publicKey: { rp: { name: 'GestVoltic' }, user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'GestVoltic', displayName: 'GestVoltic' }, challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' }, timeout: 60000, extensions: { prf: {} } } });
+    const ex = cred.getClientExtensionResults ? cred.getClientExtensionResults().prf : null;
+    if (ex && ex.enabled === false) throw new Error('Este aparelho não dá a chave da impressão digital a páginas (PRF). Continue com o PIN.');
+    const id = new Uint8Array(cred.rawId), k = await chaveBio(id), iv = crypto.getRandomValues(new Uint8Array(12));
+    const c = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, k, enc.encode(pin)));
+    const meta = await ler('meta'); meta.bio = { id, iv, c, em: new Date().toISOString() }; await gravar('meta', meta);
+  }
+  let novaVersao = '';
+  async function verVersao() {
+    try {
+      const t = await (await fetch('app.js?v=' + Date.now(), { cache: 'no-store' })).text();
+      const v = (t.match(/const VERSAO = '([^']+)'/) || [])[1];
+      if (v && v !== VERSAO) { novaVersao = v; faixa(); }
+      if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => { });
+    } catch (_) { /* sem rede: fica para a próxima */ }
+  }
+  function faixa() {
+    if (!novaVersao || $('#nv')) return;
+    document.body.insertAdjacentHTML('afterbegin', '<div id="nv" class="aviso">Há uma versão nova da aplicação (' + h(novaVersao) + '). <button class="btn peq" id="nvb">Atualizar agora</button></div>');
+    $('#nvb').onclick = () => { if (ecraExtra && !confirm('Tem um ecrã aberto: grave primeiro o que estiver a escrever. Atualizar agora?')) return; location.reload(); };
+  }
+  function cartaoSeg(el) {
+    if (!el) return;
+    ler('meta').then(meta => {
+      const tem = !!(meta && meta.bio);
+      el.innerHTML = '<h3>Entrada e versão</h3><p>Versão da aplicação: <b>' + h(VERSAO) + '</b> ' + (novaVersao ? '— há a ' + h(novaVersao) + ' <button class="btn peq" data-recarregar>Atualizar</button>' : '<button class="btn sec peq" data-procurar>Procurar atualização</button>') + '</p>' +
+        (tem ? '<p>👆 Entrada com impressão digital <b>ativa</b> desde ' + h(quando(meta.bio.em)) + '. <button class="btn sec peq" data-biodes>Desativar</button></p>'
+          : '<p>Entrar com a impressão digital em vez de escrever o PIN (o PIN continua a funcionar).</p><input id="bpin" type="password" inputmode="numeric" placeholder="Escreva o PIN para ativar" autocomplete="current-password"><p class="linha" style="margin-top:8px"><button class="btn" data-bioat>Ativar impressão digital</button></p>') +
+        '<p class="erro" id="ber"></p>';
+      el.onclick = async e => {
+        const er = el.querySelector('#ber');
+        if (e.target.closest('[data-recarregar]')) return location.reload();
+        if (e.target.closest('[data-procurar]')) { er.textContent = 'A procurar…'; await verVersao(); if (novaVersao) return cartaoSeg(el); er.textContent = 'Já tem a versão mais recente (ou está sem rede).'; return; }
+        if (e.target.closest('[data-biodes]')) { if (!confirm('Desativar a entrada com impressão digital? Passa a entrar só com o PIN.')) return; const mt = await ler('meta'); delete mt.bio; await gravar('meta', mt); return cartaoSeg(el); }
+        if (e.target.closest('[data-bioat]')) {
+          const pin = el.querySelector('#bpin').value;
+          try { const mt = await ler('meta'), k = await derivar(pin, mt.sal); await crypto.subtle.decrypt({ name: 'AES-GCM', iv: mt.teste.iv }, k, mt.teste.c); } catch (_) { er.textContent = 'PIN errado.'; return; }
+          er.textContent = 'Toque no sensor quando o telemóvel pedir (pode pedir duas vezes)…';
+          try { await ativarBio(pin); } catch (err) { er.textContent = err && err.name === 'NotAllowedError' ? 'Cancelado ou não autorizado. Pode tentar outra vez.' : (err && err.message) || 'Não foi possível ativar.'; return; }
+          alert('Impressão digital ativada. Da próxima vez pode entrar com ela.'); cartaoSeg(el);
+        }
+      };
+    });
+  }
+
   function editarRapida(n, ouvirLogo) {
     const ant = aba, antExtra = ecraExtra;
     let rec = null;
@@ -315,13 +489,14 @@
       const clis = (D?.clientes || []).map(x => '<option value="' + h(x.name) + '">').join('');
       m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>Nota rápida</h2>' + c('titulo', 'Título (opcional)') +
         '<label class="campo"><span>Texto</span><textarea data-k="texto" id="vt">' + h(n.texto) + '</textarea></label>' +
-        '<p class="linha"><button class="btn sec" data-ouvir>🎤 Falar</button><span class="nota" id="vs"></span></p>' +
+        '<p class="linha"><button class="btn sec" data-ouvir>🎤 Falar</button><span class="nota" id="vs"></span></p>' + maoHtml(n) + contactoHtml(n) +
         '<label class="campo"><span>Estado</span><select data-k="estado">' + [['pendente', 'Pendente'], ['em análise', 'Em análise'], ['concluído', 'Concluído']].map(([v, t]) => '<option value="' + v + '"' + (v === n.estado ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' +
         c('responsavel', 'Responsável') + c('prazo', 'Prazo', 'date') +
         c('ref', 'Obra / proposta (vazio = avulsa)', 'text', 'list="vlo"') + c('cliente', 'Cliente', 'text', 'list="vlc"') + c('fornecedor', 'Fornecedor') +
         '<datalist id="vlo">' + obras + '</datalist><datalist id="vlc">' + clis + '</datalist>' +
-        '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button></p><p class="nota">Corrija o texto antes de gravar. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
+        analiseHtml(n) + '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button></p><p class="nota">Corrija o texto antes de gravar. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
       const estado = t => { const e = $('#vs'); if (e) e.textContent = t; };
+      const mao = maoLigar(m, n); ligarAnalise(m);   // v207
       const botao = () => m.querySelector('[data-ouvir]');
       const falar = () => {
         if (rec) return parar();
@@ -338,13 +513,20 @@
       };
       m.onclick = async e => {
         if (e.target.closest('.voltar')) { parar(); ecraExtra = antExtra; aba = ant; return desenhar(); }
+        if (e.target.closest('[data-retirar]')) return estado(retirar(n, m));   // v207
         if (e.target.closest('[data-ouvir]')) return falar();
         if (e.target.closest('[data-gravar]')) {
           parar();
           m.querySelectorAll('[data-k]').forEach(x => { n[x.dataset.k] = x.value.trim(); });
-          if (!n.titulo && !n.texto) return estado('Escreva ou diga alguma coisa.');
+          if (!n.titulo && !n.texto && !mao.tem()) return estado('Escreva, diga ou desenhe alguma coisa.');
+          if (!n.revistoV207) { const msg = retirar(n, m, true); if (msg) { n.revistoV207 = true; return estado(msg + ' Confirme e carregue outra vez em «Gravar no aparelho».'); } }
+          delete n.revistoV207;
+          m.querySelectorAll('[data-k]').forEach(x => { n[x.dataset.k] = x.value.trim(); });
+          n.analise = lerAnalise(m, n);
+          if (n.analise.tipo === 'agenda' && !n.analise.inicio) return estado('Indique a data e a hora da marcação.');
+          if (mao.mexeu()) n.desenho = mao.url();
           if (n.ref && D && !obraPorRef(n.ref)) return estado('Essa obra não existe na lista.');
-          n.assunto = n.titulo || n.texto.split('\n')[0].slice(0, 60);
+          n.assunto = n.titulo || n.texto.split('\n')[0].slice(0, 60) || 'Nota à mão';
           n.alterada = new Date().toISOString();
           const i = N.findIndex(x => x.id === n.id); if (i >= 0) N[i] = n; else N.push(n);
           await guardarNotas();
@@ -371,6 +553,7 @@
         ['', 'Esteira', 'Tubo', 'Calha', 'Enterrado', 'Outra'].map(o => '<option' + (o === n.instalacao ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></label></div>' +
         '<div style="flex:1;min-width:120px">' + c('metros', 'Metros de cabo', 'text', 'inputmode="decimal"') + '</div></div>' +
         '<label class="campo"><span>Notas</span><textarea data-k="texto">' + h(n.texto) + '</textarea></label>' +
+        '<p class="linha"><button class="btn sec peq" data-retirar>🔎 Retirar dados do texto</button><span class="nota" id="vs2"></span></p>' +
         '<label class="campo"><span>Desenho à mão</span></label><canvas class="desenho" id="cv"></canvas><p class="linha"><button class="btn sec peq" data-limpar>Limpar desenho</button><span class="nota">Desenhe com a caneta ou o dedo.</span></p>' +
         '<label class="campo"><span>Fotografias</span></label><p class="linha"><button class="btn sec peq" data-foto="#ffc">📷 Tirar fotografia</button><button class="btn sec peq" data-foto="#ff">🖼 Escolher da galeria</button></p><input type="file" id="ffc" accept="image/*" capture="environment" hidden><input type="file" id="ff" accept="image/*" multiple hidden><div class="fotos" id="fts"></div>' +
         '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button></p><p class="nota">Fica guardada (cifrada) neste aparelho. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
@@ -391,6 +574,7 @@
       };
       m.onclick = async e => {
         if (e.target.closest('.voltar')) { if (mexeu && !confirm('Sair sem gravar o desenho?')) return; ecraExtra = antExtra; aba = ant; return desenhar(); }
+        if (e.target.closest('[data-retirar]')) { const s = $('#vs2'); if (s) s.textContent = retirar(n, m) || 'Não encontrei dados novos no texto.'; return; }   // v207
         if (e.target.closest('[data-limpar]')) { n.desenho = ''; mexeu = true; return ajusta(); }
         const fb = e.target.closest('[data-foto]'); if (fb) { emCamara = true; return $(fb.dataset.foto).click(); }
         const t = e.target.closest('[data-tira]'); if (t) { n.fotos.splice(+t.dataset.tira, 1); return desenhaFotos(); }

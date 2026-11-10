@@ -1,5 +1,5 @@
 /* GestVoltic — guarda a aplicação no aparelho para abrir sem rede. Só guarda os ficheiros da aplicação (nunca os dados). */
-const CACHE = 'gestvoltic-164.1';
+const CACHE = 'gestvoltic-207';
 const FICHEIROS = ['./', 'index.html', 'app.js', 'rtiebt.js', 'calculos.js', 'carregamento.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 /* v164: «Partilhar» do Android. As fotografias ficam em espera só neste aparelho até se escolher a obra na aplicação. */
 function abrirFila() {
@@ -23,7 +23,9 @@ self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method === 'POST' && u.origin === location.origin && u.pathname.endsWith('/partilha')) return e.respondWith(receberPartilha(e.request));
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
-  // primeiro a rede (para receber versões novas), sem rede o que está guardado
-  e.respondWith(fetch(e.request).then(r => { const c = r.clone(); caches.open(CACHE).then(k => k.put(e.request, c)); return r; })
+  if (u.searchParams.has('v')) return e.respondWith(fetch(e.request.url, { cache: 'no-store' }));   // v207: só para ver se há versão nova
+  // primeiro a rede (para receber versões novas, sem esperar pela cache do navegador), sem rede o que está guardado
+  const rede = e.request.mode === 'navigate' ? fetch(e.request) : fetch(e.request.url, { cache: 'no-cache' });
+  e.respondWith(rede.then(r => { if (r.ok) { const c = r.clone(); caches.open(CACHE).then(k => k.put(e.request, c)); } return r; })
     .catch(() => caches.match(e.request).then(r => r || caches.match('index.html'))));
 });
