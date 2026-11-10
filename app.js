@@ -3,10 +3,11 @@
    Tudo fica guardado SÓ neste aparelho, cifrado com o PIN (AES-GCM; chave PBKDF2 do PIN). Nada é enviado para lado nenhum:
    as anotações saem só quando o Jorge carrega em «Guardar anotações» e escolhe a pasta do OneDrive.
    v207: dados da nota nos campos, escrita à mão, análise (proposta, agenda, tarefa), impressão digital e aviso de versão nova.
-   v208: atalhos no ícone (nota, voz, tarefas, agenda, ferramentas) e aba Agenda com as marcações do PC (só para ver). */
+   v208: atalhos no ícone (nota, voz, tarefas, agenda, ferramentas) e aba Agenda com as marcações do PC (só para ver).
+   v209: retirar e repor notas (nunca se apaga), Potência no PTD (dados abertos E-REDES; GPS opcional) e simulador de garagem igual ao do PC. */
 (() => {
   'use strict';
-  const VERSAO = '208';
+  const VERSAO = '209';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const eur = v => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
@@ -207,17 +208,17 @@
     ecraExtra = m => {
       const c = cliente(w.client), docs = (D.documentos || {})[w.ref] || [];
       const morada = [w.finalClientAddress, w.finalClientPostal, w.finalClientTown].filter(Boolean).join(', ') || w.site || '';
-      const minhas = N.filter(n => n.ref === w.ref);
+      const minhas = vivas().filter(n => n.ref === w.ref);
       m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + h(w.ref) + '</h2><div>' + estadoChip(w) + '</div><dl class="det">' +
         '<dt>Descrição</dt><dd>' + h(w.description || '—') + '</dd>' +
         '<dt>Origem do pedido</dt><dd>' + h(c.name || '—') + (c.phone ? '<br>' + tel(c.phone) : '') + (c.email ? '<br>' + mail(c.email) : '') + '</dd>' +
         (w.finalClient || w.finalClientPhone ? '<dt>Cliente final</dt><dd>' + h(w.finalClient || '') + (w.finalClientPhone ? '<br>' + tel(w.finalClientPhone) : '') + (w.finalClientEmail ? '<br>' + mail(w.finalClientEmail) : '') + '</dd>' : '') +
         (morada ? '<dt>Morada / local</dt><dd>' + mapa(morada) + '</dd>' : '') +
-        '<dt>Valores</dt><dd>Proposta ' + eur(w.proposed) + (w.agreed ? ' · Adjudicado ' + eur(w.agreed) : '') + '</dd>' +
+        (w.ptdV206 ? '<dt>Custo de ligação E-REDES (guardado no PC)</dt><dd>' + h(w.ptdV206.total) + ' sem IVA · ' + h(String(w.ptdV206.pedido && w.ptdV206.pedido.kva || '').replace('.', ',')) + ' kVA · ' + h(dpt(w.ptdV206.em)) + '</dd>' : '') + '<dt>Valores</dt><dd>Proposta ' + eur(w.proposed) + (w.agreed ? ' · Adjudicado ' + eur(w.agreed) : '') + '</dd>' +
         '<dt>Datas</dt><dd>Pedido ' + h(dpt(w.date) || '—') + (w.sent ? ' · Enviada ' + h(dpt(w.sent)) : '') + (w.due ? ' · Ponto da situação ' + h(dpt(w.due)) : '') + (w.installDate ? ' · Instalação ' + h(dpt(w.installDate)) : '') + '</dd>' +
         (w.waitReason ? '<dt>Em espera</dt><dd>' + h(w.waitReason) + '</dd>' : '') +
         (w.notesV34 ? '<dt>Anotações</dt><dd style="white-space:pre-wrap">' + h(w.notesV34) + '</dd>' : '') + '</dl>' +
-        '<p class="linha"><button class="btn" data-anotar>✏️ Anotar nesta proposta</button><button class="btn" data-relatorio>📝 Relatório</button></p></div>' +
+        '<p class="linha"><button class="btn" data-anotar>✏️ Anotar nesta proposta</button><button class="btn" data-relatorio>📝 Relatório</button><button class="btn" data-ptd>⚡ Potência no PTD</button></p></div>' +
         (minhas.length ? '<div class="cartao"><h3>As minhas anotações desta proposta</h3><ul class="lista">' + minhas.map(n => '<li class="toque" data-nota="' + h(n.id) + '"><div class="t">' + (n.tipoNota === 'relatorio' ? '📝 ' + h(n.assunto) + ' · ' : '') + h(quando(n.criada)) + '</div><div class="s">' + h(String(n.texto || '').slice(0, 100)) + '</div></li>').join('') + '</ul></div>' : '') +
         '<div class="cartao"><h3>Documentos (' + docs.length + ')</h3>' +
         '<p><a class="btn sec peq" href="https://drive.google.com/drive/search?q=' + encodeURIComponent(w.ref) + '" target="_blank" rel="noopener">Abrir no Google Drive</a></p>' +
@@ -225,6 +226,7 @@
           : '<p class="nota">Sem documentos na pasta da proposta.</p>') + '<p class="nota">Os documentos estão na pasta Orcamentos do Google Drive; o botão procura a pasta ' + h(w.ref) + ' na aplicação do Google Drive.</p></div>';
       m.onclick = e => {
         if (e.target.closest('.voltar')) { ecraExtra = null; aba = ant; return desenhar(); }
+        if (e.target.closest('[data-ptd]')) { PTDPRE = { ref: w.ref, morada, kva: (w.ptdV206 && w.ptdV206.kvaPedido) || '' }; ecraExtra = null; aba = 'ferramentas'; desenhar(); return window.scrollTo(0, 0); }   // v209
         if (e.target.closest('[data-anotar]')) return editarNota(novaNota(w));
         if (e.target.closest('[data-relatorio]')) return editarRelatorio(novoRelatorio(w));
         const li = e.target.closest('[data-nota]'); if (li) return editarNota(N.find(n => n.id === li.dataset.nota));
@@ -269,16 +271,18 @@
 
   /* ---------------------------------------------------------------- ferramentas */
   function vFerramentas(m) {
-    m.innerHTML = '<div class="cartao" id="seg"></div><div class="filtros"><button data-t="calc" class="on">Cálculos elétricos</button><button data-t="ve">Carregamento VE</button></div><div id="ferr" class="cartao"></div>';
+    m.innerHTML = '<div class="cartao" id="seg"></div><div class="filtros"><button data-t="calc" class="on">Cálculos elétricos</button><button data-t="ve">Carregamento VE</button><button data-t="ptd">Potência no PTD</button><button data-t="garagem">Garagem (escalões)</button></div><div id="ferr" class="cartao"></div>';
     const abre = t => {
       m.querySelectorAll('[data-t]').forEach(b => b.classList.toggle('on', b.dataset.t === t));
       const el = document.createElement('div'); const box = $('#ferr'); box.innerHTML = ''; box.append(el);
       if (t === 'calc' && window.VolticCalculos) window.VolticCalculos.ligar(el);
       else if (t === 've' && window.VolticCarregamento) window.VolticCarregamento.ligar(el);
+      else if (t === 'ptd') ptdLigar(el);   // v209
+      else if (t === 'garagem') garagemLigar(el);   // v209
       else el.textContent = 'Ferramenta indisponível.';
     };
     m.onclick = e => { const b = e.target.closest('[data-t]'); if (b) abre(b.dataset.t); };
-    abre('calc');
+    abre(PTDPRE ? 'ptd' : 'calc');   // v209: vindo de uma proposta abre a Potência no PTD
     cartaoSeg($('#seg'));   // v207
   }
 
@@ -292,15 +296,16 @@
     return n;
   }
   function vNotas(m) {
-    const porGuardar = N.filter(n => !n.guardadaEm || n.alterada > n.guardadaEm);
+    const porGuardar = vivas().filter(n => !n.guardadaEm || n.alterada > n.guardadaEm);
     m.innerHTML = '<p class="linha">' + (FILA ? '<button class="btn" data-recebidas>📥 Fotografias recebidas (' + FILA + ')</button>' : '') + '<button class="btn" data-voz>🎤 Nota por voz</button><button class="btn" data-nova>+ Nova anotação</button><button class="btn sec" data-guardar' + (porGuardar.length ? '' : ' disabled') + '>⤴ Guardar anotações (' + porGuardar.length + ')</button></p>' +
       '<p class="nota">«Guardar anotações» cria um ficheiro: escolha <b>OneDrive</b> e a pasta <b>GestVoltic_movel › anotacoes</b>. O PC mostra-as em Configurações › Telemóvel e tablet.</p>' +
-      tarefasHtml() + blocoPC() + (N.length ? '<ul class="lista">' + N.slice().sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
+      tarefasHtml() + blocoPC() + (vivas().length ? '<ul class="lista">' + vivas().sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
         '<li class="toque" data-nota="' + h(n.id) + '"><div class="t">' + (n.ref ? h(n.ref) + ' · ' : '') + h(n.assunto || n.nome || 'Anotação') + '</div><div class="s">' + h(quando(n.criada)) +
         (n.telefone ? ' · ' + h(n.telefone) : '') + (n.desenho ? ' · ✏️' : '') + (n.fotos?.length ? ' · 📷' + n.fotos.length : '') + '</div><div>' +
         (!n.guardadaEm ? '<span class="chip am">por guardar</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — por guardar</span>' : '<span class="chip ok">guardada ' + h(quando(n.guardadaEm)) + '</span>') + chipAnalise(n) + '</div></li>').join('') + '</ul>'
-        : '<div class="cartao"><p>Ainda sem anotações. Use «+ Nova anotação» numa visita, ou abra uma proposta e carregue em «Anotar nesta proposta».</p></div>');
+        : '<div class="cartao"><p>Ainda sem anotações. Use «+ Nova anotação» numa visita, ou abra uma proposta e carregue em «Anotar nesta proposta».</p></div>') + retiradasHtml();
     m.onclick = e => {
+      const rp = e.target.closest('[data-repor]'); if (rp) return reporNota(rp.dataset.repor);   // v209
       const fe = e.target.closest('[data-feita]'); if (fe) return marcarFeita(fe.dataset.feita, fe.checked);   // v207
       if (e.target.closest('[data-recebidas]')) return abrirRecebidas();
       if (e.target.closest('[data-voz]')) return editarRapida(novaRapida(), true);
@@ -316,6 +321,157 @@
     const L = ((D && D.notas) || []).filter(n => !n.tarefa && !N.some(y => y.id === n.origemId));   // v207: tarefas à parte; as minhas já estão na lista
     return L.length ? '<div class="cartao"><h3>Assuntos a tratar no PC (' + L.length + ')</h3><ul class="lista">' + L.map(n => '<li><div class="t">' + h(n.titulo) + (n.voz ? ' 🎤' : '') + '</div>' + (n.descricao && n.descricao !== n.titulo ? '<div>' + h(String(n.descricao).slice(0, 160)) + '</div>' : '') + '<div class="s">' + h(n.estado === 'em análise' ? 'Em análise' : 'Pendente') + ' · ' + h(n.ligacao || 'Avulsa') + (n.responsavel ? ' · ' + h(n.responsavel) : '') + (n.prazo ? ' · Prazo ' + h(dpt(n.prazo)) : '') + '</div></li>').join('') + '</ul></div>' : '';
   }
+  /* ---------------------------------------------------------------- v209: retirar notas (nunca se apaga), Potência no PTD e simulador de garagem */
+  const vivas = () => N.filter(n => !n.retiradaEm);
+  async function retirarNota(n) {
+    const x = N.find(y => y.id === n.id); if (!x) return false;
+    if (!confirm('Retirar esta nota da lista?\n\n' + (x.guardadaEm ? 'Já foi para o PC e lá continua (no PC usa-se «Eliminar»).' : 'Ainda não foi para o PC: deixa de contar para «Guardar anotações».') + '\n\nFica em «Retiradas» e pode ser reposta.')) return false;
+    x.retiradaEm = new Date().toISOString(); await guardarNotas(); return true;
+  }
+  async function reporNota(id) { const x = N.find(y => y.id === id); if (!x) return; delete x.retiradaEm; await guardarNotas(); desenhar(); }
+  const botaoRetirar = n => N.some(y => y.id === n.id) ? '<button class="btn sec" data-retnota>🗑 Retirar nota</button>' : '';
+  function retiradasHtml() {
+    const R = N.filter(n => n.retiradaEm).sort((a, b) => String(b.retiradaEm).localeCompare(String(a.retiradaEm)));
+    if (!R.length) return '';
+    return '<details class="cartao"><summary><b>Retiradas (' + R.length + ')</b></summary><ul class="lista" style="margin-top:8px">' + R.map(n => '<li><div class="t">' + h(n.assunto || n.titulo || 'Anotação') + '</div><div class="s">Criada ' + h(quando(n.criada)) + ' · retirada ' + h(quando(n.retiradaEm)) + '</div><p class="linha" style="margin:6px 0 0"><button class="btn sec peq" data-repor="' + h(n.id) + '">Repor</button></p></li>').join('') + '</ul></details>';
+  }
+
+  /* código postal a partir da morada: sugestão do OpenStreetMap (só ao carregar), nunca por cima de um código já escrito */
+  const CPBOT = '<p class="linha" style="margin-top:-4px"><button class="btn sec peq" data-cp>📮 Procurar código postal</button><span class="nota" data-cps></span></p>';
+  async function cpBotao(m) {
+    const g = k => m.querySelector('[data-k="' + k + '"]'), s = m.querySelector('[data-cps]'), diz = t => { if (s) s.textContent = t; };
+    const mo = g('morada'), cp = g('codigoPostal'), lc = g('localidade');
+    if (!mo || !cp) return;
+    if (cp.value.trim()) return diz('Já tem código postal; não mudo.');
+    const mor = mo.value.trim(), ja = mor.match(CP);
+    const poeV = (x, v) => { if (x) { x.value = v; x.classList.add('novo'); } };
+    if (ja) { if (!confirm('A morada já tem o código postal ' + ja[1] + '-' + ja[2] + '. Usar?')) return; poeV(cp, ja[1] + '-' + ja[2]); if (lc && !lc.value.trim() && ja[3].trim()) poeV(lc, ja[3].trim()); return diz('Preenchido a partir da morada; confirme e grave.'); }
+    if (mor.length < 5) return diz('Escreva primeiro a morada (rua e número).');
+    diz('A procurar…');
+    try {
+      const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ format: 'jsonv2', limit: '1', countrycodes: 'pt', addressdetails: '1', q: [mor, lc ? lc.value.trim() : ''].filter(Boolean).join(', ') }));
+      const d = await r.json(), a = (d && d[0] && d[0].address) || {}, cpS = a.postcode || '', loc = a.city || a.town || a.village || a.municipality || '';
+      if (!/^\d{4}-\d{3}$/.test(cpS)) return diz(cpS ? 'O mapa só sabe o início (' + cpS + '); confirme nos CTT.' : 'Não encontrei o código postal desta morada.');
+      if (!confirm('Código postal sugerido pelo OpenStreetMap: ' + cpS + '\n' + [a.road, a.suburb || a.city_district, loc].filter((x, i, l) => x && l.indexOf(x) === i).join(', ') + '\n\nPode não ser exato para este número de porta. Usar?')) return diz('');
+      poeV(cp, cpS); if (lc && !lc.value.trim() && loc) poeV(lc, loc);
+      diz('Preenchido; confirme e grave.');
+    } catch (_) { diz('Sem rede ou serviço indisponível.'); }
+  }
+
+  let PTDPRE = null;   // morada e proposta quando se abre a partir de uma proposta
+  const PTDAPI = 'https://e-redes.opendatasoft.com/api/explore/v2.1/catalog/datasets/postos-transformacao-distribuicao/records?';
+  const distM = (a, b, c, d) => { const r = 6371000, p1 = a * Math.PI / 180, p2 = c * Math.PI / 180, dp = p2 - p1, dl = (d - b) * Math.PI / 180; const x = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2; return 2 * r * Math.asin(Math.sqrt(x)); };
+  const reservaP = (kva, nivel) => { const t = String(nivel || ''); if (kva == null || kva === '' || t.includes('N/D')) return null; if (t.startsWith('+')) return 0; const n = (t.match(/\d+/g) || []).map(Number); return n.length ? Math.round(kva * (1 - Math.max(...n) / 100) * 10) / 10 : null; };
+  const numP = v => { const t = String(v ?? '').trim().replace(/\s/g, '').replace(',', '.'); return t === '' || isNaN(+t) ? null : +t; };
+  const ntP = (v, d = 1) => v == null || v === '' || isNaN(+v) ? '—' : (+v).toLocaleString('pt-PT', { maximumFractionDigits: d });
+  async function localizarP(m) {
+    const r = await fetch('https://nominatim.openstreetmap.org/search?' + new URLSearchParams({ format: 'jsonv2', limit: '1', countrycodes: 'pt', q: m }));
+    if (!r.ok) throw new Error('OpenStreetMap respondeu ' + r.status);
+    const d = await r.json(); return d && d[0] ? { lat: +d[0].lat, lon: +d[0].lon, encontrada: d[0].display_name } : null;
+  }
+  async function postosP(lat, lon) {
+    if (!(lat >= 36 && lat <= 43 && lon >= -32 && lon <= -6)) throw new Error('as coordenadas não parecem ser de Portugal');
+    const ponto = "geom'POINT(" + lon.toFixed(6) + ' ' + lat.toFixed(6) + ")'"; let res = [];
+    for (const raio of [1000, 3000, 8000]) {
+      const r = await fetch(PTDAPI + new URLSearchParams({ where: 'within_distance(coordenadas_geo, ' + ponto + ', ' + raio + 'm)', order_by: 'distance(coordenadas_geo, ' + ponto + ')', limit: '6' }));
+      if (!r.ok) throw new Error('E-REDES respondeu ' + r.status);
+      res = (await r.json()).results || []; if (res.length) break;
+    }
+    return res.map(r => { const g = r.coordenadas_geo || {}; return { codigo: r.cod_instalacao || '', distancia: Math.round(distM(lat, lon, g.lat ?? lat, g.lon ?? lon)), kva: r.potencia_transformacao_kva, nivel: r.nivel_utilizacao || '', reserva: reservaP(r.potencia_transformacao_kva, r.nivel_utilizacao), contratada: r.potencia_contratada || '', clientes: r.num_clientes ?? '', tipo: r.tipo_construtivo || '', concelho: r.con_name || '' }; });
+  }
+  function cabeP(p, kva, texto) {
+    if (kva == null || kva <= 0) return '';
+    if (p.reserva == null) return texto ? 'sem dados de utilização' : '<span class="chip">❔ sem dados</span>';
+    const f = p.reserva - kva;
+    if (f < 0) return texto ? 'não cabe (faltam ' + ntP(-f) + ' kVA)' : '<span class="chip mau">❌ não cabe · faltam ' + ntP(-f) + ' kVA</span>';
+    if (f < 0.2 * kva) return texto ? 'à justa (sobram ' + ntP(f) + ' kVA)' : '<span class="chip am">⚠ à justa · sobram ' + ntP(f) + ' kVA</span>';
+    return texto ? 'cabe (sobram ' + ntP(f) + ' kVA)' : '<span class="chip ok">✅ cabe · sobram ' + ntP(f) + ' kVA</span>';
+  }
+  function ptdLigar(el) {
+    const pre = PTDPRE || {}; PTDPRE = null;
+    const w = pre.ref ? obraPorRef(pre.ref) : null, g = w && w.ptdV206;
+    let R = null, onde = null;
+    el.innerHTML = '<h3>Potência no PTD' + (w ? ' — ' + h(w.ref) : '') + '</h3>' +
+      '<label class="campo"><span>Morada</span><input type="text" id="pm" value="' + h(pre.morada || '') + '" placeholder="Rua, número de porta, localidade"></label>' +
+      '<p class="linha"><button class="btn" id="pc">Consultar</button><button class="btn sec" id="pgps">📍 Onde estou</button></p>' +
+      '<label class="campo"><span>Potência pretendida (kVA)</span><input type="text" inputmode="decimal" id="pk" value="' + h(pre.kva || '') + '" placeholder="ex.: 150"></label>' +
+      (g ? '<div class="aviso">Custo E-REDES guardado no PC (' + h(dpt(g.em)) + '): <b>' + h(g.total) + '</b> sem IVA · ' + ntP(g.pedido && g.pedido.kva, 2) + ' kVA · posto ' + h(g.posto && g.posto.codigo) + ' · ' + h(g.pedido && g.pedido.distancia) + ' m · ' + h(g.pedido && g.pedido.quem) + '</div>' : '') +
+      '<p class="nota" id="ps"></p><div id="pr"></div>' +
+      '<p class="nota">Pela morada, só a morada vai para o OpenStreetMap; com «Onde estou», só as coordenadas vão para os dados abertos da E-REDES. O posto mais próximo pode não ser o que alimenta a morada e a reserva é uma estimativa (limite superior da faixa de utilização publicada). O custo de ligação calcula-se no PC (Potência no PTD › Custo) ou no simulador E-REDES; só o pedido de ligação confirma.</p>';
+    const est = t => { el.querySelector('#ps').textContent = t; };
+    const kvaAgora = () => numP(el.querySelector('#pk').value);
+    const mostra = () => {
+      const kva = kvaAgora();
+      el.querySelector('#pr').innerHTML = R.length ? '<ul class="lista">' + R.map((p, i) => '<li><div class="t">' + h(p.codigo) + ' · ' + ntP(p.distancia, 0) + ' m</div><div class="s">' + h([p.concelho, p.tipo].filter(Boolean).join(' · ')) + '</div>' +
+        '<div>Instalada <b>' + ntP(p.kva, 0) + ' kVA</b> · utilização ' + h(p.nivel || '—') + ' · reserva estimada <b>' + ntP(p.reserva) + ' kVA</b></div><div class="s">Contratada ' + h(p.contratada || '—') + ' kVA · ' + h(p.clientes) + ' clientes</div>' +
+        '<div>' + cabeP(p, kva) + '</div><p class="linha" style="margin:6px 0 0"><button class="btn sec peq" data-psim="' + i + '">Simulador E-REDES</button><button class="btn sec peq" data-pgua="' + i + '">Guardar numa nota</button></p></li>').join('') + '</ul>'
+        : '<p>Não há postos publicados num raio de 8 km.</p>';
+    };
+    const procura = async (lat, lon, texto) => {
+      est('A procurar postos…');
+      try { R = await postosP(lat, lon); onde = { lat, lon, texto }; est(texto); mostra(); } catch (err) { est('Não foi possível consultar a E-REDES (precisa de rede): ' + err.message); }
+    };
+    el.querySelector('#pc').onclick = async () => {
+      const m = el.querySelector('#pm').value.trim();
+      if (m.length < 5) return est('Escreva a morada com número de porta e localidade.');
+      est('A localizar a morada…');
+      try { const o = await localizarP(m); if (!o) return est('Não encontrei esta morada no mapa. Confirme a escrita ou, no local, use «Onde estou».'); await procura(o.lat, o.lon, 'Localizada em: ' + o.encontrada + '. Confirme que é o sítio certo.'); }
+      catch (err) { est('Sem rede ou serviço indisponível: ' + err.message); }
+    };
+    el.querySelector('#pgps').onclick = () => {
+      if (!navigator.geolocation) return est('Este aparelho não dá a localização.');
+      est('A obter a localização…');
+      navigator.geolocation.getCurrentPosition(p => procura(p.coords.latitude, p.coords.longitude, 'Localização atual (± ' + Math.round(p.coords.accuracy) + ' m).'),
+        e => est(e.code === 1 ? 'Sem autorização para a localização (pode dar no Chrome › Definições do site).' : 'Não consegui obter a localização.'), { enableHighAccuracy: true, timeout: 20000, maximumAge: 60000 });
+    };
+    el.querySelector('#pk').oninput = () => { if (R) mostra(); };
+    el.onclick = async e => {
+      const s = e.target.closest('[data-psim]');
+      if (s) {
+        const p = R[+s.dataset.psim], kva = kvaAgora();
+        const txt = 'Consumo › Baixa Tensão › Empresa ou negócio › Trifásico › ' + (kva == null ? '(potência)' : kva > 41.4 ? '«>» › ' + ntP(kva, 1) + ' kVA' : 'escalão logo acima de ' + ntP(kva, 2) + ' kVA') + ' › Subterrânea › ' + p.distancia + ' m (corrija para o comprimento real do ramal) › E-REDES';
+        try { await navigator.clipboard.writeText(txt); } catch (_) { /* sem área de transferência */ }
+        est('No simulador escreva: ' + txt + ' (texto copiado).');
+        window.open('https://www.e-redes.pt/pt-pt/simulador', '_blank', 'noopener');
+        return;
+      }
+      const gb = e.target.closest('[data-pgua]');
+      if (gb) {
+        const p = R[+gb.dataset.pgua], kva = kvaAgora(), n = novaRapida(), agora = new Date().toISOString();
+        n.ref = w ? w.ref : ''; n.titulo = 'Potência no PTD — posto ' + p.codigo; n.assunto = n.titulo;
+        n.texto = [onde ? onde.texto : '', 'Posto ' + p.codigo + ' a ' + p.distancia + ' m; instalada ' + ntP(p.kva, 0) + ' kVA; utilização ' + (p.nivel || '—') + '; reserva estimada ' + ntP(p.reserva) + ' kVA.',
+          kva ? 'Potência pretendida ' + ntP(kva, 2) + ' kVA: ' + cabeP(p, kva, true) + '.' : '', 'Fonte: E-REDES, dados abertos (estimativa).'].filter(Boolean).join('\n');
+        n.criada = agora; n.alterada = agora; N.push(n); await guardarNotas();
+        est('Guardado numa nota' + (w ? ' da proposta ' + w.ref : '') + '. Use «Guardar anotações» para a passar ao PC.');
+      }
+    };
+  }
+
+  /* simulador de carregamento de garagem: os mesmos cálculos do PC (Voltic_simulador_escaloes.html, v205) */
+  const TIERS = [10.35, 13.8, 17.25, 20.7, 27.6, 34.5, 41.4];
+  function garagemLigar(el) {
+    const opc = TIERS.map(v => '<option value="' + v + '">' + ntP(v, 2) + ' kVA — BTN</option>').join('') + '<option value="bte">BTE — introduzir potência até 100 kVA</option>';
+    const c = (id, t, v, x) => '<label class="campo"><span>' + t + '</span><input id="g' + id + '" type="number" inputmode="decimal" value="' + v + '" ' + (x || '') + '></label>';
+    el.innerHTML = '<h3>Simulador de carregamento de garagem</h3><label class="campo"><span>Potência contratada</span><select id="gtier">' + opc + '</select></label>' +
+      '<label class="campo" id="gbtebox" hidden><span>Potência BTE (mais de 41,4 até 100 kVA)</span><input id="gbte" type="number" inputmode="decimal" value="60" min="41.5" max="100" step="0.1"></label>' +
+      c('cars', 'Número de carros', 10, 'min="1" step="1"') + c('km', 'Quilómetros por carro por dia', 50, 'min="1"') + c('hours', 'Horas disponíveis por dia', 10, 'min="0.5" max="24" step="0.5"') + c('cons', 'Consumo (kWh/100 km)', 18, 'min="1" step="0.1"') + c('other', 'Outros consumos simultâneos (kW)', 0, 'min="0" step="0.1"') + c('pf', 'Fator de potência assumido', 0.95, 'min="0.1" max="1" step="0.01"') +
+      '<div id="gres" class="cartao" style="background:#f4f8fb"></div><h3>Comparação de potências</h3><p class="nota">BTN: escalões oficiais de 10,35 a 41,4 kVA. Valores BTE são exemplos de simulação, não escalões oficiais.</p><ul class="lista" id="gcmp"></ul>' +
+      '<p class="nota">Sem perdas. Assume aproveitamento contínuo da potência e gestão de carga adequada. Não verifica limites por fase, potência dos carregadores, capacidade das baterias ou viabilidade da ligação. Fator de potência assumido, não medido. Alternar noites não aumenta a energia média diária disponível. O mínimo calculado não substitui o dimensionamento elétrico. Fontes: Escalões BTN — E-REDES; DIT-C14-100: potências disponíveis e BTE.</p>';
+    const $g = id => el.querySelector('#g' + id), fmt = n => n.toLocaleString('pt-PT', { maximumFractionDigits: 2 });
+    function calc() {
+      const isBte = $g('tier').value === 'bte'; $g('btebox').hidden = !isBte;
+      const p = isBte ? +$g('bte').value : +$g('tier').value, ids = ['cars', 'km', 'hours', 'cons', 'other', 'pf'], [n, k, hh, c0, o0, pf] = ids.map(id => +$g(id).value);
+      if (ids.some(id => $g(id).value === '') || n < 1 || !Number.isInteger(n) || k <= 0 || hh <= 0 || hh > 24 || c0 <= 0 || o0 < 0 || pf <= 0 || pf > 1 || (isBte && (p <= 41.4 || p > 100))) { $g('res').textContent = 'Verifique os valores introduzidos. BTE: potência superior a 41,4 e até 100 kVA.'; $g('cmp').innerHTML = ''; return; }
+      const per = k * c0 / 100, e = Math.max(0, p * pf - o0) * hh, max = Math.floor((e + 1e-9) / per), req = n * per / hh, min = (req + o0) / pf, next = TIERS.find(v => v + 1e-9 >= min);
+      const recomenda = min <= 41.4 ? 'Escalão BTN suficiente neste modelo: <b>' + fmt(next) + ' kVA</b>.' : 'Necessidade em BTE: <b>' + fmt(min) + ' kVA</b> no mínimo teórico' + (min > 100 ? ' — ultrapassa o limite de 100 kVA deste simulador' : '') + '.';
+      $g('res').innerHTML = '<h3>' + (max >= n ? 'A potência chega para o objetivo.' : 'A potência não chega para todos.') + '</h3>Consegue servir <b>' + fmt(Math.min(n, max)) + ' dos ' + n + ' carros</b>.<br>Capacidade máxima: <b>' + max + ' carros/dia</b>.<br>O limite é ultrapassado a partir de <b>' + (max + 1) + ' carros</b>.<hr>Energia por carro: <b>' + fmt(per) + ' kWh/dia</b><br>Energia disponível: <b>' + fmt(e) + ' kWh/dia</b><br>Energia necessária para todos: <b>' + fmt(n * per) + ' kWh/dia</b><br>Potência necessária só para carregar: <b>' + fmt(req) + ' kW</b><br>Potência contratada mínima teórica: <b>' + fmt(min) + ' kVA</b><p>' + recomenda + '</p>Dividindo por todos: <b>' + fmt(e / n) + ' kWh ≈ ' + fmt(e / n / c0 * 100) + ' km por carro/dia</b>.';
+      const vals = [...new Set([...TIERS, 50, 60, 70, 80, 90, 100, ...(isBte ? [p] : [])])].sort((a, b) => a - b);
+      $g('cmp').innerHTML = vals.map(v => { const en = Math.max(0, v * pf - o0) * hh; return '<li style="' + (v === p ? 'background:#edf1ff;font-weight:700' : '') + '">' + fmt(v) + ' kVA · ' + (v <= 41.4 ? 'BTN' : 'BTE — exemplo') + '<div class="s">' + fmt(en) + ' kWh/dia · ' + Math.floor((en + 1e-9) / per) + ' carros</div></li>'; }).join('');
+    }
+    el.querySelectorAll('input,select').forEach(x => x.addEventListener('input', calc));
+    calc();
+  }
+
   /* ---------------------------------------------------------------- v208: agenda (só para ver) e atalhos do ícone */
   document.head.insertAdjacentHTML('beforeend', '<style>nav.abas button{font-size:10px;padding:8px 1px 9px}.ag-dia{margin:0 0 10px}.ag-dia h3{text-transform:capitalize}.ag-ev{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--linha)}.ag-ev:first-of-type{border-top:0}.ag-h{min-width:86px;font-weight:700;font-size:14px}.ag-c{width:10px;height:10px;border-radius:50%;margin-top:5px;flex:none}</style>');
   const CORAG = { 'Obra': '#1f7a4d', 'Visita técnica': '#2346d6', 'Reunião': '#7b3fb5', 'Prazo': '#b3261e', 'Outro': '#5f6b76', 'Pedido': '#b86e00' };
@@ -330,7 +486,7 @@
     const desde = agPassados ? diaLocal(d7) : hojeS;
     /* pedido já tratado no PC: foi guardado, o ficheiro do PC é mais recente e a nota já não vem como «por tratar» */
     const tratado = n => n.guardadaEm && D.geradoEm && new Date(D.geradoEm) > new Date(n.guardadaEm) && !(D.notas || []).some(x => x.origemId === n.id);
-    const pedidos = N.filter(n => n.analise && n.analise.tipo === 'agenda' && n.analise.inicio && !tratado(n))
+    const pedidos = vivas().filter(n => n.analise && n.analise.tipo === 'agenda' && n.analise.inicio && !tratado(n))
       .map(n => ({ pedido: true, notaId: n.id, tipo: 'Pedido', titulo: n.assunto || 'Nota', inicio: n.analise.inicio, fim: '', local: [n.morada, n.localidade].filter(Boolean).join(', ') }));
     const L = [...D.agenda, ...pedidos].filter(e => String(e.fim || e.inicio).slice(0, 10) >= desde).sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
     const dias = {};
@@ -399,7 +555,7 @@
     const tem = ['nome', 'telefone', 'email', 'morada', 'codigoPostal', 'localidade'].some(k => n[k]);
     return '<details class="cartao" id="ctd"' + (tem ? ' open' : '') + '><summary><b>Contacto e morada</b></summary><p class="linha"><button class="btn sec peq" data-retirar>🔎 Retirar dados do texto</button></p>' +
       cK(n, 'nome', 'Nome do contacto') + cK(n, 'telefone', 'Telefone', 'tel') + cK(n, 'email', 'Email', 'text', 'inputmode="email"') + cK(n, 'morada', 'Morada') +
-      '<div class="linha"><div style="flex:1;min-width:120px">' + cK(n, 'codigoPostal', 'Código postal') + '</div><div style="flex:2;min-width:160px">' + cK(n, 'localidade', 'Localidade') + '</div></div>' +
+      '<div class="linha"><div style="flex:1;min-width:120px">' + cK(n, 'codigoPostal', 'Código postal') + '</div><div style="flex:2;min-width:160px">' + cK(n, 'localidade', 'Localidade') + '</div></div>' + CPBOT +
       '<p class="nota">Telefone: fixo 2xx ou móvel 91, 92, 93 ou 96. Números depois de NIF ou NIPC não contam.</p></details>';
   }
   const vazioC = cv => !cv.width || !cv.height || vazio(cv);
@@ -453,7 +609,7 @@
   };
   function tarefasHtml() {
     const ord = (a, b) => PRIO.indexOf(a.p) - PRIO.indexOf(b.p) || String(a.prazo || '9').localeCompare(String(b.prazo || '9'));
-    const T = N.filter(n => n.analise && n.analise.tipo === 'tarefa' && !n.analise.feita).map(n => ({ n, p: n.analise.prioridade, prazo: n.prazo }));
+    const T = vivas().filter(n => n.analise && n.analise.tipo === 'tarefa' && !n.analise.feita).map(n => ({ n, p: n.analise.prioridade, prazo: n.prazo }));
     const P = ((D && D.notas) || []).filter(x => x.tarefa && !x.tarefa.feita && !N.some(y => y.id === x.origemId)).map(x => ({ x, p: x.tarefa.prioridade, prazo: x.prazo }));
     const L = [...T, ...P].sort(ord);
     if (!L.length) return '';
@@ -544,7 +700,7 @@
         c('responsavel', 'Responsável') + c('prazo', 'Prazo', 'date') +
         c('ref', 'Obra / proposta (vazio = avulsa)', 'text', 'list="vlo"') + c('cliente', 'Cliente', 'text', 'list="vlc"') + c('fornecedor', 'Fornecedor') +
         '<datalist id="vlo">' + obras + '</datalist><datalist id="vlc">' + clis + '</datalist>' +
-        analiseHtml(n) + '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button></p><p class="nota">Corrija o texto antes de gravar. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
+        analiseHtml(n) + '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button>' + botaoRetirar(n) + '</p><p class="nota">Corrija o texto antes de gravar. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
       const estado = t => { const e = $('#vs'); if (e) e.textContent = t; };
       const mao = maoLigar(m, n); ligarAnalise(m);   // v207
       const botao = () => m.querySelector('[data-ouvir]');
@@ -563,6 +719,8 @@
       };
       m.onclick = async e => {
         if (e.target.closest('.voltar')) { parar(); ecraExtra = antExtra; aba = ant; return desenhar(); }
+        if (e.target.closest('[data-cp]')) return cpBotao(m);   // v209
+        if (e.target.closest('[data-retnota]')) { parar(); if (await retirarNota(n)) { ecraExtra = antExtra; aba = antExtra ? ant : 'notas'; desenhar(); } return; }   // v209
         if (e.target.closest('[data-retirar]')) return estado(retirar(n, m));   // v207
         if (e.target.closest('[data-ouvir]')) return falar();
         if (e.target.closest('[data-gravar]')) {
@@ -597,7 +755,7 @@
         '<p class="nota">Pode escrever com a caneta em qualquer campo: o teclado do Android passa a escrita a texto.</p>' +
         (!n.ref ? c('assunto', 'Assunto (ex.: Posto de carregamento, quadro elétrico…)') : '') +
         c('nome', 'Nome') + c('telefone', 'Telefone', 'tel') + c('email', 'Email', 'email') + c('morada', 'Morada') +
-        '<div class="linha"><div style="flex:1;min-width:120px">' + c('codigoPostal', 'Código postal') + '</div><div style="flex:2;min-width:160px">' + c('localidade', 'Localidade') + '</div></div>' +
+        '<div class="linha"><div style="flex:1;min-width:120px">' + c('codigoPostal', 'Código postal') + '</div><div style="flex:2;min-width:160px">' + c('localidade', 'Localidade') + '</div></div>' + CPBOT +
         '<div class="linha"><div style="flex:1;min-width:120px">' + c('potencia', 'Potência a instalar (kW)', 'text', 'inputmode="decimal"') + '</div>' +
         '<div style="flex:1;min-width:120px"><label class="campo"><span>Tipo de instalação</span><select data-k="instalacao">' +
         ['', 'Esteira', 'Tubo', 'Calha', 'Enterrado', 'Outra'].map(o => '<option' + (o === n.instalacao ? ' selected' : '') + '>' + o + '</option>').join('') + '</select></label></div>' +
@@ -606,7 +764,7 @@
         '<p class="linha"><button class="btn sec peq" data-retirar>🔎 Retirar dados do texto</button><span class="nota" id="vs2"></span></p>' +
         '<label class="campo"><span>Desenho à mão</span></label><canvas class="desenho" id="cv"></canvas><p class="linha"><button class="btn sec peq" data-limpar>Limpar desenho</button><span class="nota">Desenhe com a caneta ou o dedo.</span></p>' +
         '<label class="campo"><span>Fotografias</span></label><p class="linha"><button class="btn sec peq" data-foto="#ffc">📷 Tirar fotografia</button><button class="btn sec peq" data-foto="#ff">🖼 Escolher da galeria</button></p><input type="file" id="ffc" accept="image/*" capture="environment" hidden><input type="file" id="ff" accept="image/*" multiple hidden><div class="fotos" id="fts"></div>' +
-        '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button></p><p class="nota">Fica guardada (cifrada) neste aparelho. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
+        '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button>' + botaoRetirar(n) + '</p><p class="nota">Fica guardada (cifrada) neste aparelho. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
       const desenhaFotos = () => { $('#fts').innerHTML = (n.fotos || []).map((f, i) => '<div><img src="' + f + '"><button data-tira="' + i + '">×</button></div>').join(''); };
       desenhaFotos();
       const cv = $('#cv'), ctx = cv.getContext('2d');
@@ -624,6 +782,8 @@
       };
       m.onclick = async e => {
         if (e.target.closest('.voltar')) { if (mexeu && !confirm('Sair sem gravar o desenho?')) return; ecraExtra = antExtra; aba = ant; return desenhar(); }
+        if (e.target.closest('[data-cp]')) return cpBotao(m);   // v209
+        if (e.target.closest('[data-retnota]')) { if (await retirarNota(n)) { ecraExtra = antExtra; aba = antExtra ? ant : 'notas'; desenhar(); } return; }   // v209
         if (e.target.closest('[data-retirar]')) { const s = $('#vs2'); if (s) s.textContent = retirar(n, m) || 'Não encontrei dados novos no texto.'; return; }   // v207
         if (e.target.closest('[data-limpar]')) { n.desenho = ''; mexeu = true; return ajusta(); }
         const fb = e.target.closest('[data-foto]'); if (fb) { emCamara = true; return $(fb.dataset.foto).click(); }
@@ -722,7 +882,7 @@
         '<input type="file" id="rc" accept="image/*" capture="environment" hidden><input type="file" id="rg" accept="image/*" multiple hidden>' +
         n.fotos.map((f, i) => '<div class="linha" style="align-items:flex-start;margin-bottom:8px"><img src="' + f + '" alt="Fotografia ' + (i + 1) + '" style="width:96px;height:96px;object-fit:cover;border-radius:8px"><div style="flex:1;min-width:150px"><input type="text" data-fo="' + i + '" placeholder="Observação desta fotografia" value="' + h(n.fotoObs[i] || '') + '"><button class="btn sec peq" style="margin-top:6px" data-retira="' + i + '">Retirar</button></div></div>').join('') +
         (n.retiradas.length ? '<details><summary>Retiradas (' + n.retiradas.length + ')</summary>' + n.retiradas.map((f, i) => '<div class="linha" style="margin:6px 0"><img src="' + f.img + '" alt="Fotografia retirada" style="width:64px;height:64px;object-fit:cover;border-radius:8px"><button class="btn sec peq" data-repoe="' + i + '">Repor</button></div>').join('') + '</details>' : '') +
-        '<p class="erro" id="re"></p><p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button></p><p class="nota">Fica guardado (cifrado) neste aparelho. Depois use «Guardar anotações» para o passar ao PC; lá carrega em «Importar para o relatório».</p></div>';
+        '<p class="erro" id="re"></p><p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button>' + botaoRetirar(n) + '</p><p class="nota">Fica guardado (cifrado) neste aparelho. Depois use «Guardar anotações» para o passar ao PC; lá carrega em «Importar para o relatório».</p></div>';
       const ler = () => {
         m.querySelectorAll('[data-k]').forEach(x => { n[x.dataset.k] = x.value.trim(); });
         m.querySelectorAll('[data-c]').forEach(x => { n.campos[x.dataset.c] = x.value.trim(); });
@@ -738,6 +898,7 @@
       }
       m.onclick = async e => {
         if (e.target.closest('.voltar')) { ler(); if (n.fotos.length || n.texto || N.some(x => x.id === n.id)) await gravarRel(n); return sai(); }
+        if (e.target.closest('[data-retnota]')) { if (await retirarNota(n)) sai(); return; }   // v209
         const ab = e.target.closest('[data-abre]'); if (ab) { emCamara = true; return $(ab.dataset.abre).click(); }
         const t = e.target.closest('[data-retira]');
         if (t) { ler(); const i = +t.dataset.retira; n.retiradas.push({ img: n.fotos[i], obs: n.fotoObs[i] || '', em: new Date().toISOString() }); n.fotos.splice(i, 1); n.fotoObs.splice(i, 1); await gravarRel(n); return desenhar(); }
@@ -795,7 +956,7 @@
           await mudarFila(lista, (s, x) => s.put(Object.assign(x, { ignorada: true }))); FILA = 0; fim(); return desenhar();
         }
         const li = e.target.closest('li[data-w]'); if (!li || m.dataset.ocupado) return;
-        const w = D.obras.find(x => String(x.id) === li.dataset.w), aberto = N.find(x => x.tipoNota === 'relatorio' && x.ref === w.ref && (!x.guardadaEm || x.alterada > x.guardadaEm));
+        const w = D.obras.find(x => String(x.id) === li.dataset.w), aberto = vivas().find(x => x.tipoNota === 'relatorio' && x.ref === w.ref && (!x.guardadaEm || x.alterada > x.guardadaEm));
         const n = aberto && confirm('Juntar ao relatório por guardar de ' + quando(aberto.criada) + '?\n\nCancelar = criar um relatório novo.') ? aberto : novoRelatorio(w);
         m.dataset.ocupado = '1';
         try {
