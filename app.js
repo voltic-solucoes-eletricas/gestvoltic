@@ -2,10 +2,11 @@
    Dados: o Voltic_movel.json que o programa do PC grava na pasta do OneDrive; aqui escolhe-se esse ficheiro em «Atualizar».
    Tudo fica guardado SÓ neste aparelho, cifrado com o PIN (AES-GCM; chave PBKDF2 do PIN). Nada é enviado para lado nenhum:
    as anotações saem só quando o Jorge carrega em «Guardar anotações» e escolhe a pasta do OneDrive.
-   v207: dados da nota nos campos, escrita à mão, análise (proposta, agenda, tarefa), impressão digital e aviso de versão nova. */
+   v207: dados da nota nos campos, escrita à mão, análise (proposta, agenda, tarefa), impressão digital e aviso de versão nova.
+   v208: atalhos no ícone (nota, voz, tarefas, agenda, ferramentas) e aba Agenda com as marcações do PC (só para ver). */
 (() => {
   'use strict';
-  const VERSAO = '207';
+  const VERSAO = '208';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const eur = v => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
@@ -112,7 +113,7 @@
   });
 
   /* ---------------------------------------------------------------- estrutura */
-  const ABAS = [['avisos', '🔔', 'Avisos'], ['propostas', '📄', 'Propostas'], ['clientes', '👥', 'Clientes'], ['catalogo', '📚', 'Catálogo'], ['ferramentas', '🧮', 'Ferramentas'], ['notas', '✏️', 'Anotações']];
+  const ABAS = [['avisos', '🔔', 'Avisos'], ['agenda', '📅', 'Agenda'], ['propostas', '📄', 'Propostas'], ['clientes', '👥', 'Clientes'], ['catalogo', '📚', 'Catálogo'], ['ferramentas', '🧮', 'Ferramentas'], ['notas', '✏️', 'Anotações']];
   function principal() {
     raiz().innerHTML = '<header><h1 id="tit">GestVoltic</h1><button id="atu">⟳ Atualizar</button></header><main id="m"></main>' +
       '<nav class="abas">' + ABAS.map(([k, i, t]) => '<button data-aba="' + k + '"><b>' + i + '</b>' + t + '</button>').join('') + '</nav>' +
@@ -123,6 +124,7 @@
     desenhar();
     verPartilhas();
     verVersao();   // v207
+    irPara();   // v208
   }
   async function carregarFicheiro(ev) {
     const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
@@ -144,7 +146,7 @@
         '<p class="nota">O programa do PC atualiza esse ficheiro sozinho de 15 em 15 minutos. Se o OneDrive pedir, escolha «Manter sempre neste dispositivo».</p></div>';
       return;
     }
-    ({ avisos: vAvisos, propostas: vPropostas, clientes: vClientes, catalogo: vCatalogo, ferramentas: vFerramentas, notas: vNotas })[aba](m);
+    ({ avisos: vAvisos, agenda: vAgenda, propostas: vPropostas, clientes: vClientes, catalogo: vCatalogo, ferramentas: vFerramentas, notas: vNotas })[aba](m);
   }
   const velho = () => D && D.geradoEm && (Date.now() - new Date(D.geradoEm).getTime() > 2 * 86400000);
   const topo = () => D ? '<p class="nota">Dados do PC de ' + h(quando(D.geradoEm)) + (velho() ? ' — <b style="color:#b3261e">têm mais de 2 dias: carregue em ⟳ Atualizar</b>' : '') + '</p>' : '';
@@ -314,6 +316,54 @@
     const L = ((D && D.notas) || []).filter(n => !n.tarefa && !N.some(y => y.id === n.origemId));   // v207: tarefas à parte; as minhas já estão na lista
     return L.length ? '<div class="cartao"><h3>Assuntos a tratar no PC (' + L.length + ')</h3><ul class="lista">' + L.map(n => '<li><div class="t">' + h(n.titulo) + (n.voz ? ' 🎤' : '') + '</div>' + (n.descricao && n.descricao !== n.titulo ? '<div>' + h(String(n.descricao).slice(0, 160)) + '</div>' : '') + '<div class="s">' + h(n.estado === 'em análise' ? 'Em análise' : 'Pendente') + ' · ' + h(n.ligacao || 'Avulsa') + (n.responsavel ? ' · ' + h(n.responsavel) : '') + (n.prazo ? ' · Prazo ' + h(dpt(n.prazo)) : '') + '</div></li>').join('') + '</ul></div>' : '';
   }
+  /* ---------------------------------------------------------------- v208: agenda (só para ver) e atalhos do ícone */
+  document.head.insertAdjacentHTML('beforeend', '<style>nav.abas button{font-size:10px;padding:8px 1px 9px}.ag-dia{margin:0 0 10px}.ag-dia h3{text-transform:capitalize}.ag-ev{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--linha)}.ag-ev:first-of-type{border-top:0}.ag-h{min-width:86px;font-weight:700;font-size:14px}.ag-c{width:10px;height:10px;border-radius:50%;margin-top:5px;flex:none}</style>');
+  const CORAG = { 'Obra': '#1f7a4d', 'Visita técnica': '#2346d6', 'Reunião': '#7b3fb5', 'Prazo': '#b3261e', 'Outro': '#5f6b76', 'Pedido': '#b86e00' };
+  let agPassados = false;
+  const diaLocal = d => { const p = x => String(x).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
+  function vAgenda(m) {
+    if (!Array.isArray(D.agenda)) {
+      m.innerHTML = topo() + '<div class="cartao"><h2>Agenda</h2><p>O ficheiro do PC ainda não traz a agenda. Instale a versão 208 no PC e, depois de o programa gravar o ficheiro (até 15 minutos), carregue em <b>⟳ Atualizar</b>.</p></div>';
+      return;
+    }
+    const hojeS = diaLocal(new Date()), d7 = new Date(); d7.setDate(d7.getDate() - 7);
+    const desde = agPassados ? diaLocal(d7) : hojeS;
+    /* pedido já tratado no PC: foi guardado, o ficheiro do PC é mais recente e a nota já não vem como «por tratar» */
+    const tratado = n => n.guardadaEm && D.geradoEm && new Date(D.geradoEm) > new Date(n.guardadaEm) && !(D.notas || []).some(x => x.origemId === n.id);
+    const pedidos = N.filter(n => n.analise && n.analise.tipo === 'agenda' && n.analise.inicio && !tratado(n))
+      .map(n => ({ pedido: true, notaId: n.id, tipo: 'Pedido', titulo: n.assunto || 'Nota', inicio: n.analise.inicio, fim: '', local: [n.morada, n.localidade].filter(Boolean).join(', ') }));
+    const L = [...D.agenda, ...pedidos].filter(e => String(e.fim || e.inicio).slice(0, 10) >= desde).sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+    const dias = {};
+    for (const e of L) { const k = String(e.inicio).slice(0, 10) < desde ? desde : String(e.inicio).slice(0, 10); (dias[k] = dias[k] || []).push(e); }
+    const hora = e => e.diaTodo ? 'Dia inteiro' : String(e.inicio).slice(11, 16) + (e.fim && String(e.fim).slice(0, 10) === String(e.inicio).slice(0, 10) ? '–' + String(e.fim).slice(11, 16) : '');
+    const nomeDia = k => (k === hojeS ? 'Hoje · ' : '') + new Date(k + 'T12:00:00').toLocaleDateString('pt-PT', { weekday: 'long', day: '2-digit', month: '2-digit' });
+    m.innerHTML = topo() + '<div class="filtros"><button data-ag="0" class="' + (agPassados ? '' : 'on') + '">Próximas</button><button data-ag="1" class="' + (agPassados ? 'on' : '') + '">Incluir os últimos 7 dias</button></div>' +
+      (Object.keys(dias).length ? Object.entries(dias).map(([k, es]) => '<div class="cartao ag-dia"><h3>' + h(nomeDia(k)) + '</h3>' + es.map(e =>
+        '<div class="ag-ev' + (e.ref && obraPorRef(e.ref) || e.pedido ? ' toque' : '') + '"' + (e.ref ? ' data-ref="' + h(e.ref) + '"' : '') + (e.pedido ? ' data-nota="' + h(e.notaId) + '"' : '') + '><span class="ag-c" style="background:' + (CORAG[e.tipo] || CORAG.Outro) + '"></span><div class="ag-h">' + h(hora(e)) + '</div><div style="flex:1;min-width:0">' +
+        '<div><b>' + h(e.titulo) + '</b>' + (e.pedido ? ' <span class="chip am">pedido ao PC</span>' : '') + '</div><div class="s">' + h([e.tipo !== 'Pedido' ? e.tipo : '', e.cliente, e.fornecedor, e.tecnico].filter(Boolean).join(' · ')) + '</div>' +
+        (e.local ? '<div class="s">' + mapa(e.local) + '</div>' : '') + (e.notas ? '<div class="s" style="white-space:pre-wrap">' + h(String(e.notas).slice(0, 200)) + '</div>' : '') + '</div></div>').join('') + '</div>').join('')
+        : '<div class="cartao"><p>Sem marcações ' + (agPassados ? 'nos últimos 7 dias nem nos próximos meses' : 'nos próximos meses') + '.</p></div>') +
+      '<p class="nota">Agenda do PC (só para ver). Para marcar, crie uma nota e escolha «Marcar na agenda»: o PC cria a marcação quando confirmar.</p>';
+    m.onclick = e => {
+      if (e.target.closest('a')) return;
+      const f = e.target.closest('[data-ag]'); if (f) { agPassados = f.dataset.ag === '1'; return vAgenda(m); }
+      const n = e.target.closest('[data-nota]'); if (n) return editarNota(N.find(x => x.id === n.dataset.nota));
+      const r = e.target.closest('[data-ref]'); if (r && obraPorRef(r.dataset.ref)) abrirObra(obraPorRef(r.dataset.ref));
+    };
+  }
+  let IR = new URLSearchParams(location.search).get('ir') || '';
+  function irPara() {
+    const ir = IR; IR = '';
+    if (!ir) return;
+    if (/[?&]ir=/.test(location.search)) history.replaceState(null, '', './');
+    if (ir === 'nota') return editarRapida(novaRapida());
+    if (ir === 'voz') return editarRapida(novaRapida(), true);
+    if (ir === 'agenda' || ir === 'ferramentas' || ir === 'tarefas') {
+      aba = ir === 'tarefas' ? 'notas' : ir; ecraExtra = null; desenhar(); window.scrollTo(0, 0);
+      if (ir === 'tarefas') { const t = $('#tarefas'); if (t) t.scrollIntoView({ block: 'start' }); }
+    }
+  }
+
   /* ---------------------------------------------------------------- v207: dados do texto, escrita à mão e análise da nota */
   document.head.insertAdjacentHTML('beforeend', '<style>input.novo{background:#fff4d6}input[type=datetime-local]{width:100%;padding:10px;border:1px solid #9fb3bf;border-radius:10px;background:#fff;font-size:16px}details>summary{cursor:pointer;padding:4px 0}#nv{position:sticky;top:0;z-index:6;margin:0;border-radius:0}</style>');
   const TEL = /(?<!\d)(?:\+?351[ .-]?)?(2\d{2}|9[1236]\d)[ .-]?(\d{3})[ .-]?(\d{3})(?!\d)/g, FISCAL = /(?:nif|nipc|contribuinte|contrib)[^a-z0-9]{0,4}$/i;
@@ -407,7 +457,7 @@
     const P = ((D && D.notas) || []).filter(x => x.tarefa && !x.tarefa.feita && !N.some(y => y.id === x.origemId)).map(x => ({ x, p: x.tarefa.prioridade, prazo: x.prazo }));
     const L = [...T, ...P].sort(ord);
     if (!L.length) return '';
-    return '<div class="cartao"><h3>Tarefas (' + L.length + ')</h3><ul class="lista">' + L.map(o => o.n
+    return '<div class="cartao" id="tarefas"><h3>Tarefas (' + L.length + ')</h3><ul class="lista">' + L.map(o => o.n
       ? '<li><label style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" data-feita="' + h(o.n.id) + '" style="width:22px;height:22px;margin-top:2px;flex:none"><span><span class="chip ' + corP(o.p) + '">' + h(o.p) + '</span> <b>' + h(o.n.assunto || o.n.titulo || 'Nota') + '</b>' + (o.prazo ? '<br><span class="s">Prazo ' + h(dpt(o.prazo)) + '</span>' : '') + '</span></label></li>'
       : '<li><span class="chip ' + corP(o.p) + '">' + h(o.p) + '</span> <b>' + h(o.x.titulo) + '</b><div class="s">Do PC' + (o.prazo ? ' · Prazo ' + h(dpt(o.prazo)) : '') + ' · marca-se como feita no PC</div></li>').join('') + '</ul></div>';
   }

@@ -14,6 +14,13 @@
     "enctype": "multipart/form-data",
     "params": { "files": [{ "name": "fotos", "accept": ["image/*"] }] }
   },
+  "shortcuts": [
+    { "name": "Nova nota", "short_name": "Nota", "url": "./?ir=nota", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Nota por voz", "short_name": "Voz", "url": "./?ir=voz", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Tarefas", "short_name": "Tarefas", "url": "./?ir=tarefas", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Agenda", "short_name": "Agenda", "url": "./?ir=agenda", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Ferramentas", "short_name": "Ferramentas", "url": "./?ir=ferramentas", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
