@@ -7,7 +7,7 @@
    v209: retirar e repor notas (nunca se apaga), Potência no PTD (dados abertos E-REDES; GPS opcional) e simulador de garagem igual ao do PC. */
 (() => {
   'use strict';
-  const VERSAO = '235';
+  const VERSAO = '236';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const eur = v => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
@@ -90,6 +90,7 @@
       try { const x = await ler('tecnico'); TEC = x ? await decifrar(x) : ''; } catch (_) { TEC = ''; }
       principal();
       ligaDetetor(!detetorPedido());   // v235: a primeira vez pede a autorização (logo a seguir ao PIN, que conta como toque)
+      sincronizar(true);   // v236
     };
     const vai = async () => {
       if (Date.now() < esperaAte) return $('#er').textContent = 'Espere ' + Math.ceil((esperaAte - Date.now()) / 1000) + ' s.';
@@ -138,7 +139,7 @@
       '<nav class="abas">' + ABAS.map(([k, i, t]) => '<button data-aba="' + k + '"><b>' + i + '</b>' + t + '</button>').join('') + '</nav>' +
       '<input type="file" id="fich" accept=".json,application/json" hidden>';
     $('nav.abas').onclick = e => { const b = e.target.closest('[data-aba]'); if (b) { aba = b.dataset.aba; ecraExtra = null; desenhar(); window.scrollTo(0, 0); } };
-    $('#atu').onclick = () => $('#fich').click();
+    $('#atu').onclick = () => gLigado() ? sincronizar(true, true) : $('#fich').click();   // v236
     $('#fich').onchange = carregarFicheiro;
     desenhar();
     verPartilhas();
@@ -316,8 +317,8 @@
   function vNotas(m) {
     const porGuardar = vivas().filter(n => !n.guardadaEm || n.alterada > n.guardadaEm);
     m.innerHTML = '<p class="linha">' + (FILA ? '<button class="btn" data-recebidas>📥 Fotografias recebidas (' + FILA + ')</button>' : '') + '<button class="btn" data-voz>🎤 Nota por voz</button><button class="btn" data-nova>+ Nova anotação</button><button class="btn sec" data-guardar' + (porGuardar.length ? '' : ' disabled') + '>⤴ Guardar anotações (' + porGuardar.length + ')</button></p>' +
-      '<p class="nota">«Guardar anotações» cria um ficheiro: escolha <b>OneDrive</b> e a pasta <b>GestVoltic_movel › anotacoes</b>. O PC mostra-as em Configurações › Telemóvel e tablet.</p>' +
-      tarefasHtml() + blocoPC() + (vivas().length ? '<ul class="lista">' + vivas().sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
+      (gLigado() ? '<p class="nota">Ligado ao Google Drive: as anotações passam sozinhas para o PC (<span id="gsinc">' + h(gEstado || '…') + '</span>).</p>' : '<p class="nota">«Guardar anotações» cria um ficheiro: escolha a pasta <b>GestVoltic_movel › anotacoes</b>. Para passar sozinho, ligue ao Google Drive em Ferramentas › Entrada e versão.</p>') +   // v236
+      tarefasHtml() + blocoPC() + (vivas().filter(n => n.tipoNota !== 'agenda').length ? '<ul class="lista">' + vivas().filter(n => n.tipoNota !== 'agenda').sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
         '<li class="toque" data-nota="' + h(n.id) + '"><div class="t">' + (n.ref ? h(n.ref) + ' · ' : '') + h(n.assunto || n.nome || 'Anotação') + '</div><div class="s">' + h(quando(n.criada)) +
         (n.telefone ? ' · ' + h(n.telefone) : '') + (n.desenho ? ' · ✏️' : '') + (n.fotos?.length ? ' · 📷' + n.fotos.length : '') + '</div><div>' +
         (!n.guardadaEm ? '<span class="chip am">por guardar</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — por guardar</span>' : '<span class="chip ok">guardada ' + h(quando(n.guardadaEm)) + '</span>') + chipAnalise(n) + '</div></li>').join('') + '</ul>'
@@ -328,7 +329,7 @@
       if (e.target.closest('[data-recebidas]')) return abrirRecebidas();
       if (e.target.closest('[data-voz]')) return editarRapida(novaRapida(), true);
       if (e.target.closest('[data-nova]')) return editarNota(novaNota(null));
-      if (e.target.closest('[data-guardar]')) return exportar(porGuardar);
+      if (e.target.closest('[data-guardar]')) return gLigado() ? sincronizar(true, true) : exportar(porGuardar);   // v236
       const li = e.target.closest('[data-nota]'); if (li) editarNota(N.find(n => n.id === li.dataset.nota));
     };
   }
@@ -493,7 +494,7 @@
   /* ---------------------------------------------------------------- v208: agenda (só para ver) e atalhos do ícone */
   document.head.insertAdjacentHTML('beforeend', '<style>nav.abas button{font-size:10px;padding:8px 1px 9px}.ag-dia{margin:0 0 10px}.ag-dia h3{text-transform:capitalize}.ag-ev{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--linha)}.ag-ev:first-of-type{border-top:0}.ag-h{min-width:86px;font-weight:700;font-size:14px}.ag-c{width:10px;height:10px;border-radius:50%;margin-top:5px;flex:none}</style>');
   const CORAG = { 'Obra': '#1f7a4d', 'Visita técnica': '#2346d6', 'Reunião': '#7b3fb5', 'Prazo': '#b3261e', 'Outro': '#5f6b76', 'Pedido': '#b86e00' };
-  let agPassados = false;
+  let agPassados = false, agLista = [];   // v236: agLista
   const diaLocal = d => { const p = x => String(x).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
   function vAgenda(m) {
     if (!Array.isArray(D.agenda)) {
@@ -506,20 +507,24 @@
     const tratado = n => n.guardadaEm && D.geradoEm && new Date(D.geradoEm) > new Date(n.guardadaEm) && !(D.notas || []).some(x => x.origemId === n.id);
     const pedidos = vivas().filter(n => n.analise && n.analise.tipo === 'agenda' && n.analise.inicio && !tratado(n))
       .map(n => ({ pedido: true, notaId: n.id, tipo: 'Pedido', titulo: n.assunto || 'Nota', inicio: n.analise.inicio, fim: '', local: [n.morada, n.localidade].filter(Boolean).join(', ') }));
-    const L = [...D.agenda, ...pedidos].filter(e => String(e.fim || e.inicio).slice(0, 10) >= desde).sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+    const L = [...agendaComPendentes(), ...pedidos].filter(e => String(e.fim || e.inicio).slice(0, 10) >= desde).sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
     const dias = {};
     for (const e of L) { const k = String(e.inicio).slice(0, 10) < desde ? desde : String(e.inicio).slice(0, 10); (dias[k] = dias[k] || []).push(e); }
     const hora = e => e.diaTodo ? 'Dia inteiro' : String(e.inicio).slice(11, 16) + (e.fim && String(e.fim).slice(0, 10) === String(e.inicio).slice(0, 10) ? '–' + String(e.fim).slice(11, 16) : '');
     const nomeDia = k => (k === hojeS ? 'Hoje · ' : '') + new Date(k + 'T12:00:00').toLocaleDateString('pt-PT', { weekday: 'long', day: '2-digit', month: '2-digit' });
-    m.innerHTML = topo() + '<div class="filtros"><button data-ag="0" class="' + (agPassados ? '' : 'on') + '">Próximas</button><button data-ag="1" class="' + (agPassados ? 'on' : '') + '">Incluir os últimos 7 dias</button></div>' +
+    agLista = L;   // v236
+    m.innerHTML = topo() + '<p class="linha"><button class="btn" data-agn>+ Nova marcação</button></p><div class="filtros"><button data-ag="0" class="' + (agPassados ? '' : 'on') + '">Próximas</button><button data-ag="1" class="' + (agPassados ? 'on' : '') + '">Incluir os últimos 7 dias</button></div>' +
       (Object.keys(dias).length ? Object.entries(dias).map(([k, es]) => '<div class="cartao ag-dia"><h3>' + h(nomeDia(k)) + '</h3>' + es.map(e =>
         '<div class="ag-ev' + (e.ref && obraPorRef(e.ref) || e.pedido ? ' toque' : '') + '"' + (e.ref ? ' data-ref="' + h(e.ref) + '"' : '') + (e.pedido ? ' data-nota="' + h(e.notaId) + '"' : '') + '><span class="ag-c" style="background:' + (CORAG[e.tipo] || CORAG.Outro) + '"></span><div class="ag-h">' + h(hora(e)) + '</div><div style="flex:1;min-width:0">' +
-        '<div><b>' + h(e.titulo) + '</b>' + (e.pedido ? ' <span class="chip am">pedido ao PC</span>' : '') + '</div><div class="s">' + h([e.tipo !== 'Pedido' ? e.tipo : '', e.cliente, e.fornecedor, e.tecnico].filter(Boolean).join(' · ')) + '</div>' +
-        (e.local ? '<div class="s">' + mapa(e.local) + '</div>' : '') + (e.notas ? '<div class="s" style="white-space:pre-wrap">' + h(String(e.notas).slice(0, 200)) + '</div>' : '') + '</div></div>').join('') + '</div>').join('')
+        '<div><b>' + h(e.titulo) + '</b>' + (e.pedido ? ' <span class="chip am">pedido ao PC</span>' : '') + (e.pronta ? ' <span class="chip ok">✔ Pronta</span>' : '') + (e.pendente ? ' <span class="chip am">por passar ao PC</span>' : '') + '</div><div class="s">' + h([e.tipo !== 'Pedido' ? e.tipo : '', e.cliente, e.fornecedor, e.tecnico].filter(Boolean).join(' · ')) + '</div>' +
+        (e.local ? '<div class="s">' + mapa(e.local) + '</div>' : '') + (e.notas ? '<div class="s" style="white-space:pre-wrap">' + h(String(e.notas).slice(0, 200)) + '</div>' : '') + botoesAg(e) + '</div></div>').join('') + '</div>').join('')
         : '<div class="cartao"><p>Sem marcações ' + (agPassados ? 'nos últimos 7 dias nem nos próximos meses' : 'nos próximos meses') + '.</p></div>') +
-      '<p class="nota">Agenda do PC (só para ver). Para marcar, crie uma nota e escolha «Marcar na agenda»: o PC cria a marcação quando confirmar.</p>';
+      '<p class="nota">Agenda do PC. As marcações novas, alteradas ou «prontas» feitas aqui passam sozinhas para o PC' + (gLigado() ? '.' : ' depois de ligar ao Google Drive (Ferramentas › Entrada e versão).') + '</p>';   // v236
     m.onclick = e => {
       if (e.target.closest('a')) return;
+      if (e.target.closest('[data-agn]')) return formAgenda(null);   // v236
+      const bp = e.target.closest('[data-agp]'); if (bp) { const x = agLista.find(y => String(y.id) === bp.dataset.agp); if (x && confirm('Marcar a visita «' + x.titulo + '» como pronta?')) acaoAgenda('pronta', { id: x.id, titulo: x.titulo }).then(() => vAgenda(m)); return; }
+      const be = e.target.closest('[data-age]'); if (be) { const x = agLista.find(y => String(y.id) === be.dataset.age); if (x) formAgenda(x); return; }
       const f = e.target.closest('[data-ag]'); if (f) { agPassados = f.dataset.ag === '1'; return vAgenda(m); }
       const n = e.target.closest('[data-nota]'); if (n) return editarNota(N.find(x => x.id === n.dataset.nota));
       const r = e.target.closest('[data-ref]'); if (r && obraPorRef(r.dataset.ref)) abrirObra(obraPorRef(r.dataset.ref));
@@ -687,9 +692,13 @@
         (tem ? '<p>👆 Entrada com impressão digital <b>ativa</b> desde ' + h(quando(meta.bio.em)) + '. <button class="btn sec peq" data-biodes>Desativar</button></p>'
           : '<p>Entrar com a impressão digital em vez de escrever o PIN (o PIN continua a funcionar).</p><input id="bpin" type="password" inputmode="numeric" placeholder="Escreva o PIN para ativar" autocomplete="current-password"><p class="linha" style="margin-top:8px"><button class="btn" data-bioat>Ativar impressão digital</button></p>') +
         '<p>🔒 O PIN volta a ser pedido: <b>' + (detetor ? 'quando o ecrã bloqueia ou desliga' : 'ao fim de 5 minutos fora da aplicação') + '</b>.' + (!detetor && 'IdleDetector' in window ? ' <button class="btn sec peq" data-detetor>Pedir só quando o ecrã desliga</button>' : !detetor ? ' <small>(este aparelho não permite saber quando o ecrã desliga)</small>' : '') + '</p>' +   // v235
+        '<p>☁ Google Drive: ' + (gLigado() ? '<b>ligado</b> — <span id="gsinc">' + h(gEstado || 'à espera da primeira sincronização') + '</span> <button class="btn sec peq" data-gsinc>Sincronizar agora</button> <button class="btn sec peq" data-gdes>Desligar</button>' : 'não ligado. <button class="btn peq" data-glig>Ligar ao Google Drive</button><br><small>Entra com a sua conta Google. O Google avisa «aplicação não verificada»: é normal (a aplicação é sua, em modo de teste) — carregue em «Continuar».</small>') + '</p>' +   // v236
         '<p class="erro" id="ber"></p>';
       el.onclick = async e => {
         const er = el.querySelector('#ber');
+        if (e.target.closest('[data-glig]')) { try { await gToken(true); gPastas = null; await sincronizar(true, true); } catch (err) { er.textContent = 'Não foi possível ligar ao Google Drive: ' + err.message; } return cartaoSeg(el); }   // v236
+        if (e.target.closest('[data-gsinc]')) { await sincronizar(true, true); return cartaoSeg(el); }
+        if (e.target.closest('[data-gdes]')) { if (!confirm('Desligar do Google Drive? As anotações voltam a ser guardadas à mão.')) return; try { localStorage.removeItem('gv_google'); } catch (_) { } try { if (gTok && window.google) google.accounts.oauth2.revoke(gTok, () => { }); } catch (_) { } gTok = ''; gPastas = null; gEstado = ''; return cartaoSeg(el); }
         if (e.target.closest('[data-detetor]')) { const ok = await ligaDetetor(true); if (ok) return cartaoSeg(el); er.textContent = 'Sem autorização: o telemóvel recusou (pode autorizar em Definições do Chrome › Definições de sites › Deteção de inatividade). Continua a regra dos 5 minutos.'; return; }
         if (e.target.closest('[data-recarregar]')) return location.reload();
         if (e.target.closest('[data-procurar]')) { er.textContent = 'A procurar…'; await verVersao(); if (novaVersao) return cartaoSeg(el); er.textContent = 'Já tem a versão mais recente (ou está sem rede).'; return; }
@@ -855,6 +864,139 @@
     const t = agora.toISOString();
     for (const n of lista) { const x = N.find(y => y.id === n.id); if (x) x.guardadaEm = t; }
     await guardarNotas(); desenhar();
+  }
+
+  /* ---------------------------------------------------------------- v236: sincronização pelo Google Drive */
+  // Entra uma vez com a conta Google (autorização «GestVoltic», em modo de teste); depois, sem escolher ficheiros: envia as anotações por guardar
+  // para «O meu disco › GestVoltic_movel › anotacoes» e recebe o Voltic_movel.json do PC. A autorização dura 1 hora: renova-se no toque seguinte no ecrã.
+  const GCLIENTE = '623272136348-plera80oo1n2lkpn1k1or8kn0g94r5eh.apps.googleusercontent.com', GESCOPO = 'https://www.googleapis.com/auth/drive';
+  let gTok = '', gExp = 0, gCliente = null, gPastas = null, gEstado = '', gSinc = false;
+  const gLigado = () => { try { return localStorage.getItem('gv_google') === '1'; } catch (_) { return false; } };
+  const gValido = () => !!gTok && Date.now() < gExp - 60000;
+  const hm = () => new Date().toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  function gScript() {
+    return new Promise((ok, falha) => {
+      if (window.google && google.accounts && google.accounts.oauth2) return ok();
+      const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = () => ok(); s.onerror = () => falha(new Error('sem rede para o Google')); document.head.append(s);
+    });
+  }
+  async function gToken(primeira) {
+    if (gValido()) return gTok;
+    await gScript();
+    return new Promise((ok, falha) => {
+      if (!gCliente) gCliente = google.accounts.oauth2.initTokenClient({ client_id: GCLIENTE, scope: GESCOPO, callback: () => { } });
+      gCliente.callback = r => { if (r.error) return falha(new Error(r.error)); gTok = r.access_token; gExp = Date.now() + (Number(r.expires_in) || 3600) * 1000; try { localStorage.setItem('gv_google', '1'); } catch (_) { } ok(gTok); };
+      gCliente.error_callback = e => falha(new Error(e && e.type === 'popup_closed' ? 'janela do Google fechada' : (e && e.type) || 'cancelado'));
+      gCliente.requestAccessToken({ prompt: primeira ? 'consent' : '' });
+    });
+  }
+  async function gApi(url, op) {
+    if (!gValido()) throw new Error('autorização do Google expirada');
+    const r = await fetch(url, Object.assign({}, op, { headers: Object.assign({}, (op && op.headers) || {}, { Authorization: 'Bearer ' + gTok }) }));
+    if (r.status === 401) { gTok = ''; throw new Error('autorização do Google expirada'); }
+    if (!r.ok) throw new Error('Google Drive respondeu ' + r.status);
+    return r;
+  }
+  const gQ = async q => ((await (await gApi('https://www.googleapis.com/drive/v3/files?pageSize=20&fields=files(id,name,modifiedTime)&orderBy=modifiedTime%20desc&q=' + encodeURIComponent(q))).json()).files || []);
+  async function gPastasDe() {
+    if (gPastas) return gPastas;
+    const raiz = (await gQ("name='GestVoltic_movel' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false"))[0];
+    if (!raiz) throw new Error('a pasta GestVoltic_movel ainda não está no Google Drive (o PC cria-a depois de instalada a versão 236)');
+    const anot = (await gQ("name='anotacoes' and mimeType='application/vnd.google-apps.folder' and '" + raiz.id + "' in parents and trashed=false"))[0];
+    if (!anot) throw new Error('falta a pasta anotacoes dentro de GestVoltic_movel');
+    return gPastas = { raiz: raiz.id, anot: anot.id };
+  }
+  async function gEnviar() {
+    const lista = vivas().filter(n => !n.guardadaEm || n.alterada > n.guardadaEm); if (!lista.length) return 0;
+    const P = await gPastasDe(), agora = new Date();
+    const nome = 'anotacoes_' + agora.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_') + '_' + Math.random().toString(36).slice(2, 6) + '.json';
+    const corpo = JSON.stringify({ formato: 'gestvoltic-anotacoes-1', versao: VERSAO, criadoEm: agora.toISOString(), anotacoes: lista.map(({ retiradas, ...x }) => x) });
+    const b = 'gv' + Date.now(), meta = JSON.stringify({ name: nome, parents: [P.anot], mimeType: 'application/json' });
+    await gApi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b },
+      body: '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta + '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + corpo + '\r\n--' + b + '--' });
+    const t = agora.toISOString(); for (const n of lista) { const x = N.find(y => y.id === n.id); if (x) x.guardadaEm = t; }
+    await _gGuardarNotas(); return lista.length;
+  }
+  async function gReceber() {
+    const P = await gPastasDe(), f = (await gQ("name='Voltic_movel.json' and '" + P.raiz + "' in parents and trashed=false"))[0];
+    if (!f) return false;
+    let ult = ''; try { ult = localStorage.getItem('gv_g_mod') || ''; } catch (_) { }
+    if (D && ult === f.modifiedTime) return false;
+    const x = await (await gApi('https://www.googleapis.com/drive/v3/files/' + f.id + '?alt=media')).json();
+    if (x.formato !== 'gestvoltic-movel-1') return false;
+    D = x; await guardarDados(); try { localStorage.setItem('gv_g_mod', f.modifiedTime); } catch (_) { }
+    return true;
+  }
+  async function sincronizar(interativo, avisar) {
+    if (!gLigado() || gSinc || !CHAVE) return;
+    gSinc = true;
+    try {
+      if (!gValido()) { if (!interativo) { gEstado = 'toque no ecrã para sincronizar'; return; } await gToken(false); }
+      const env = await gEnviar(), rec = await gReceber();
+      gEstado = 'sincronizado às ' + hm() + (env ? ' · ' + env + ' enviada(s)' : '') + (rec ? ' · dados do PC recebidos' : '');
+      if (env || rec) desenhar();
+      if (avisar) alert('Sincronizado com o PC pelo Google Drive.' + (env ? '\n' + env + ' anotação(ões) enviada(s).' : '') + (rec ? '\nDados do PC atualizados.' : '\nOs dados do PC já estavam em dia.'));
+    } catch (err) { gEstado = 'por sincronizar: ' + err.message; if (avisar) alert('Não foi possível sincronizar: ' + err.message); }
+    finally { gSinc = false; const t = document.getElementById('gsinc'); if (t) t.textContent = gEstado; }
+  }
+  const _gGuardarNotas = guardarNotas;
+  guardarNotas = async function () { await _gGuardarNotas(); if (gLigado() && !gSinc) setTimeout(() => sincronizar(false), 1500); };
+  setInterval(() => sincronizar(false), 2 * 60 * 1000);
+  document.addEventListener('click', () => { if (gLigado() && CHAVE && !gValido() && !gSinc) sincronizar(true); }, true);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && gValido()) setTimeout(() => sincronizar(false), 800); });
+
+  /* ---------------------------------------------------------------- v236: marcações na agenda feitas no telemóvel */
+  const TIPOSAG = ['Visita técnica', 'Obra', 'Reunião', 'Prazo', 'Outro'];
+  const agLocal = () => { const d = new Date(), p = x => String(x).padStart(2, '0'); return diaLocal(d) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()); };
+  function agendaComPendentes() {
+    const L = (D.agenda || []).map(e => Object.assign({}, e)), lim = new Date(Date.now() - 60 * 864e5).toISOString();
+    for (const a of vivas().filter(n => n.tipoNota === 'agenda' && n.criada >= lim).sort((x, y) => x.criada.localeCompare(y.criada))) {
+      const i = L.findIndex(e => String(e.id) === String(a.eventoId));
+      if (a.acao === 'criar' && i < 0) L.push(Object.assign({}, a.evento, { pendente: true, editavel: true }));
+      else if (a.acao === 'alterar' && i >= 0 && !a.guardadaEm) L[i] = Object.assign({}, L[i], a.evento, { pendente: true });
+      else if (a.acao === 'apagar' && i >= 0) L.splice(i, 1);
+      else if (a.acao === 'pronta' && i >= 0 && !L[i].pronta) L[i] = Object.assign({}, L[i], { pronta: true, pendente: true });
+    }
+    return L;
+  }
+  async function acaoAgenda(acao, ev, extra) {
+    const agora = new Date().toISOString();
+    N.push(Object.assign({ id: novoId(), criada: agora, alterada: agora, tipoNota: 'agenda', acao, eventoId: ev.id, evento: ev, assunto: 'Agenda: ' + (ev.titulo || ''), guardadaEm: '' }, extra || {}));
+    await guardarNotas();
+  }
+  function botoesAg(e) {
+    if (e.pedido) return '';
+    const p = [], id = h(e.id);
+    if (/visita/i.test(e.tipo || '') && !e.pronta && String(e.inicio) <= agLocal()) p.push('<button class="btn peq" data-agp="' + id + '">✔ Pronta</button>');
+    if (e.editavel !== false && !/^w:/.test(String(e.id))) p.push('<button class="btn sec peq" data-age="' + id + '">✎ Alterar</button>');
+    return p.length ? '<p class="linha" style="margin:6px 0 0">' + p.join('') + '</p>' : '';
+  }
+  function formAgenda(e) {
+    const m = $('#m'), d = e || {}, dia = String(d.inicio || '').slice(0, 10) || diaLocal(new Date()), hi = d.diaTodo ? '' : String(d.inicio || '').slice(11, 16), hf = d.diaTodo ? '' : String(d.fim || '').slice(11, 16);
+    const refs = (D.obras || []).map(w => w.ref).filter(Boolean);
+    m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + (e ? 'Alterar marcação' : 'Nova marcação') + '</h2>' +
+      '<label class="campo"><span>Tipo</span><select id="agt">' + TIPOSAG.map(t => '<option' + (t === (d.tipo || 'Visita técnica') ? ' selected' : '') + '>' + h(t) + '</option>').join('') + '</select></label>' +
+      '<label class="campo"><span>Título</span><input id="agti" value="' + h(d.titulo || '') + '" placeholder="Ex.: Visita técnica — condomínio"></label>' +
+      '<label class="campo"><span>Dia</span><input id="agd" type="date" value="' + h(dia) + '"></label>' +
+      '<label class="campo"><span>Das</span><input id="aghi" type="time" value="' + h(hi) + '"></label><label class="campo"><span>Às</span><input id="aghf" type="time" value="' + h(hf) + '"></label>' +
+      '<label class="campo"><span><input type="checkbox" id="agdt"' + (d.diaTodo ? ' checked' : '') + '> Dia inteiro</span></label>' +
+      '<label class="campo"><span>Morada / local</span><input id="agl" value="' + h(d.local || '') + '"></label>' +
+      '<label class="campo"><span>Proposta (referência)</span><input id="agr" list="agrl" value="' + h(d.ref || '') + '"><datalist id="agrl">' + refs.map(r => '<option value="' + h(r) + '">').join('') + '</datalist></label>' +
+      '<label class="campo"><span>Técnico</span><input id="agtc" value="' + h(d.tecnico || TEC || '') + '"></label>' +
+      '<label class="campo"><span>Notas</span><textarea id="agn2" rows="3">' + h(d.notas || '') + '</textarea></label>' +
+      '<p class="erro" id="ager"></p><p class="linha"><button class="btn" data-ags>Guardar</button>' + (e ? '<button class="btn sec" data-agx>Apagar</button>' : '') + '</p>' +
+      '<p class="nota">' + (gLigado() ? 'Passa sozinha para a agenda do PC.' : 'Para passar sozinha para o PC, ligue ao Google Drive em Ferramentas › Entrada e versão.') + '</p></div>';
+    m.onclick = async ev => {
+      if (ev.target.closest('.voltar')) return desenhar();
+      if (ev.target.closest('[data-agx]')) { if (!confirm('Apagar esta marcação? No PC fica em «Apagados» e pode ser reposta.')) return; await acaoAgenda('apagar', { id: d.id, titulo: d.titulo }); aba = 'agenda'; return desenhar(); }
+      if (!ev.target.closest('[data-ags]')) return;
+      const ti = $('#agti').value.trim(), di = $('#agd').value, todo = $('#agdt').checked, a = $('#aghi').value, b = $('#aghf').value;
+      if (!ti) return $('#ager').textContent = 'Escreva o título.';
+      if (!di) return $('#ager').textContent = 'Escolha o dia.';
+      if (!todo && !a) return $('#ager').textContent = 'Indique a hora de início (ou marque «Dia inteiro»).';
+      const evn = { id: e ? e.id : 'a' + novoId(), tipo: $('#agt').value, titulo: ti, inicio: di + 'T' + (todo ? '00:00' : a), fim: di + 'T' + (todo ? '23:59' : (b || a)), diaTodo: todo, local: $('#agl').value.trim(), ref: $('#agr').value.trim(), tecnico: $('#agtc').value.trim(), notas: $('#agn2').value.trim() };
+      await acaoAgenda(e ? 'alterar' : 'criar', evn); aba = 'agenda'; desenhar();
+    };
   }
 
   /* ---------------------------------------------------------------- v164: relatório da obra e fotografias partilhadas */
