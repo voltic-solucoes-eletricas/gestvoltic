@@ -7,7 +7,7 @@
    v209: retirar e repor notas (nunca se apaga), Potência no PTD (dados abertos E-REDES; GPS opcional) e simulador de garagem igual ao do PC. */
 (() => {
   'use strict';
-  const VERSAO = '209';
+  const VERSAO = '235';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const eur = v => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
@@ -77,6 +77,7 @@
       await gravar('meta', { sal, teste, criado: new Date().toISOString() });
       D = null; N = []; await guardarNotas();
       principal();
+      ligaDetetor(!detetorPedido());   // v235
     };
   }
   function pedirPin(meta) {
@@ -88,6 +89,7 @@
       try { const x = await ler('notas'); N = x ? await decifrar(x) : []; } catch (_) { N = []; }
       try { const x = await ler('tecnico'); TEC = x ? await decifrar(x) : ''; } catch (_) { TEC = ''; }
       principal();
+      ligaDetetor(!detetorPedido());   // v235: a primeira vez pede a autorização (logo a seguir ao PIN, que conta como toque)
     };
     const vai = async () => {
       if (Date.now() < esperaAte) return $('#er').textContent = 'Espere ' + Math.ceil((esperaAte - Date.now()) / 1000) + ' s.';
@@ -104,12 +106,28 @@
       await abre();
     };
   }
-  // bloqueia ao fim de 5 minutos fora da aplicação
-  let escondidoEm = 0;
+  // v235: o PIN volta a ser pedido só quando o ecrã bloqueia ou desliga (Deteção de inatividade do Chrome: estado do ecrã «locked»).
+  //       Sem essa autorização, ou num aparelho que não a tenha, fica a regra antiga: 5 minutos fora da aplicação.
+  let escondidoEm = 0, ecraBloqueou = false, detetor = null;
+  const detetorPedido = () => { try { return localStorage.getItem('gv_detetor_pedido') === '1'; } catch (_) { return true; } };
+  async function ligaDetetor(pedir) {
+    if (detetor) return true;
+    if (!('IdleDetector' in window)) return false;
+    try {
+      if (pedir) { try { localStorage.setItem('gv_detetor_pedido', '1'); } catch (_) { } if (await IdleDetector.requestPermission() !== 'granted') return false; }
+      else { const st = await navigator.permissions.query({ name: 'idle-detection' }); if (st.state !== 'granted') return false; }
+      const d = new IdleDetector();
+      d.addEventListener('change', () => { if (d.screenState === 'locked') ecraBloqueou = true; });
+      await d.start({ threshold: 60000 }); detetor = d; return true;
+    } catch (_) { return false; }
+  }
   document.addEventListener('visibilitychange', async () => {
-    if (document.hidden) escondidoEm = Date.now();
-    else if (emCamara) emCamara = false; // v164: voltar da câmara ou da galeria não bloqueia
-    else if (CHAVE && escondidoEm && Date.now() - escondidoEm > 5 * 60 * 1000) { CHAVE = null; D = null; N = []; pedirPin(await ler('meta')); }
+    if (document.hidden) { escondidoEm = Date.now(); if (detetor && detetor.screenState === 'locked') ecraBloqueou = true; return; }
+    if (emCamara) { emCamara = false; return; }   // v164: voltar da câmara ou da galeria não bloqueia
+    if (detetor) await new Promise(r => setTimeout(r, 400));   // deixa chegar o aviso de «ecrã bloqueado» que ficou em espera
+    const bloquear = !!CHAVE && (detetor ? ecraBloqueou : (escondidoEm && Date.now() - escondidoEm > 5 * 60 * 1000));
+    ecraBloqueou = false;
+    if (bloquear) { CHAVE = null; D = null; N = []; pedirPin(await ler('meta')); }
     else if (CHAVE) verVersao();   // v207
   });
 
@@ -201,7 +219,7 @@
   }
   const tel = t => t ? '<a href="tel:' + h(String(t).replace(/\s/g, '')) + '">' + h(t) + '</a>' : '';
   const mail = t => t ? '<a href="mailto:' + h(t) + '">' + h(t) + '</a>' : '';
-  const mapa = t => t ? '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(t) + '" target="_blank" rel="noopener">' + h(t) + '</a>' : '';
+  const mapa = t => t ? '<a href="https://waze.com/ul?q=' + encodeURIComponent(t) + '&navigate=yes" target="_blank" rel="noopener" title="Abrir no Waze">' + h(t) + '</a>' : '';   // v235: moradas abrem no Waze
   function abrirObra(w) {
     if (!w) return;
     const ant = aba;
@@ -668,9 +686,11 @@
       el.innerHTML = '<h3>Entrada e versão</h3><p>Versão da aplicação: <b>' + h(VERSAO) + '</b> ' + (novaVersao ? '— há a ' + h(novaVersao) + ' <button class="btn peq" data-recarregar>Atualizar</button>' : '<button class="btn sec peq" data-procurar>Procurar atualização</button>') + '</p>' +
         (tem ? '<p>👆 Entrada com impressão digital <b>ativa</b> desde ' + h(quando(meta.bio.em)) + '. <button class="btn sec peq" data-biodes>Desativar</button></p>'
           : '<p>Entrar com a impressão digital em vez de escrever o PIN (o PIN continua a funcionar).</p><input id="bpin" type="password" inputmode="numeric" placeholder="Escreva o PIN para ativar" autocomplete="current-password"><p class="linha" style="margin-top:8px"><button class="btn" data-bioat>Ativar impressão digital</button></p>') +
+        '<p>🔒 O PIN volta a ser pedido: <b>' + (detetor ? 'quando o ecrã bloqueia ou desliga' : 'ao fim de 5 minutos fora da aplicação') + '</b>.' + (!detetor && 'IdleDetector' in window ? ' <button class="btn sec peq" data-detetor>Pedir só quando o ecrã desliga</button>' : !detetor ? ' <small>(este aparelho não permite saber quando o ecrã desliga)</small>' : '') + '</p>' +   // v235
         '<p class="erro" id="ber"></p>';
       el.onclick = async e => {
         const er = el.querySelector('#ber');
+        if (e.target.closest('[data-detetor]')) { const ok = await ligaDetetor(true); if (ok) return cartaoSeg(el); er.textContent = 'Sem autorização: o telemóvel recusou (pode autorizar em Definições do Chrome › Definições de sites › Deteção de inatividade). Continua a regra dos 5 minutos.'; return; }
         if (e.target.closest('[data-recarregar]')) return location.reload();
         if (e.target.closest('[data-procurar]')) { er.textContent = 'A procurar…'; await verVersao(); if (novaVersao) return cartaoSeg(el); er.textContent = 'Já tem a versão mais recente (ou está sem rede).'; return; }
         if (e.target.closest('[data-biodes]')) { if (!confirm('Desativar a entrada com impressão digital? Passa a entrar só com o PIN.')) return; const mt = await ler('meta'); delete mt.bio; await gravar('meta', mt); return cartaoSeg(el); }

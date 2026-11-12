@@ -1,5 +1,5 @@
 /* GestVoltic — guarda a aplicação no aparelho para abrir sem rede. Só guarda os ficheiros da aplicação (nunca os dados). */
-const CACHE = 'gestvoltic-209';
+const CACHE = 'gestvoltic-235';
 const FICHEIROS = ['./', 'index.html', 'app.js', 'rtiebt.js', 'calculos.js', 'carregamento.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 /* v164: «Partilhar» do Android. As fotografias ficam em espera só neste aparelho até se escolher a obra na aplicação. */
 function abrirFila() {
