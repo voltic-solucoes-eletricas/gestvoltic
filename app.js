@@ -11,10 +11,11 @@
    v239: separador ⏱ Tempos (entradas e saídas minhas e dos colaboradores, com a obra) que vão para o Registo de ponto do PC; reagendar
    todas as marcações; PIN/impressão digital só ao abrir a aplicação depois de fechada; botão 👁 para ocultar os valores; Catálogo nas Ferramentas.
    v240: agenda como no PC — Mês, Semana, Dia (e Lista), filtros por tipo e responsável; arrastar marcações para outro dia ou hora.
-   v241: a vista Mês mostra só os dias do mês em questão. */
+   v241: a vista Mês mostra só os dias do mês em questão.
+   v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '241';
+  const VERSAO = '242';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -1330,13 +1331,20 @@
   const fmtT = m => Math.floor(m / 60) + 'h ' + String(Math.round(m % 60)).padStart(2, '0') + 'm';
   const agoraHM = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
   let tCid = (() => { try { return localStorage.getItem('gv_t_cid') || ''; } catch (_) { return ''; } })(), tObra = '';
+  let tFase = (() => { try { return localStorage.getItem('gv_t_fase') || ''; } catch (_) { return ''; } })();   // v242
+  const refEst = () => String(new Date().getFullYear()).slice(2) + 'COM000';
+  function faseSel(id, atual) {   // v242: fases vindas do PC (Recursos Humanos › Parâmetros)
+    const F = (D && D.fasesV307) || {}, ob = (F.obra && F.obra.length ? F.obra : ['Instalação', 'Produção']), es = (F.estrutura && F.estrutura.length ? F.estrutura : ['Administrativo', 'Comercial', 'Compras']);
+    const op = v => '<option' + (v === atual ? ' selected' : '') + '>' + h(v) + '</option>';
+    return '<select id="' + id + '"><option value="">—</option><optgroup label="Obra">' + ob.map(op).join('') + '</optgroup><optgroup label="Estrutura (' + refEst() + ')">' + es.map(op).join('') + '</optgroup></select>';
+  }
   const refletida = n => n.guardadaEm && D && D.geradoEm && (new Date(D.geradoEm) - new Date(n.guardadaEm) > 4 * 60000);
   function pontoDe(cid) {
     const P = JSON.parse(JSON.stringify(((D && D.pontoRecente) || {})[cid] || {}));
     const L = vivas().filter(n => n.tipoNota === 'ponto' && n.cid === cid && !refletida(n)).sort((a, b) => String(a.criada).localeCompare(String(b.criada)));
     for (const n of L) {
       const r = P[n.dia] = P[n.dia] || { marcas: [], tipo: '', nota: '' };
-      if (n.acao === 'marca') { const x = r.marcas.find(y => y.id && y.id === n.marcaId); if (x) Object.assign(x, { e: n.e, s: n.s || '', obra: n.obraRef || '', pend: true }); else r.marcas.push({ e: n.e, s: n.s || '', obra: n.obraRef || '', id: n.marcaId, origem: 'telemóvel', pend: true }); }
+      if (n.acao === 'marca') { const x = r.marcas.find(y => y.id && y.id === n.marcaId); if (x) Object.assign(x, { e: n.e, s: n.s || '', obra: n.obraRef || '', fase: n.fase || '', pend: true }); else r.marcas.push({ e: n.e, s: n.s || '', obra: n.obraRef || '', fase: n.fase || '', id: n.marcaId, origem: 'telemóvel', pend: true }); }
       else if (n.acao === 'fecha') { const x = r.marcas.find(y => !y.s); if (x) { x.s = n.s; x.pend = true; } }
       else if (n.acao === 'tipo') { r.tipo = n.tipo || ''; if (n.nota != null) r.nota = n.nota; r.pend = true; }
       else if (n.acao === 'tirar') { const i = r.marcas.findIndex(y => y.id === n.marcaId); if (i >= 0) r.marcas.splice(i, 1); }
@@ -1355,25 +1363,25 @@
     if (!Array.isArray(C) || !C.length) { m.innerHTML = topo() + '<div class="cartao"><h2>⏱ Tempos</h2><p>O ficheiro do PC ainda não traz os colaboradores. Instale no PC a versão 301 (e tenha colaboradores ativos em Recursos Humanos) e carregue em ⟳ Atualizar.</p></div>'; return; }
     if (!C.some(c => c.id === tCid)) tCid = C[0].id;
     const P = pontoDe(tCid), hj = diaLocal(new Date()), ab = ((P[hj] || {}).marcas || []).find(x => !x.s);
-    const refs = (D.obras || []).filter(ativa).map(w => '<option value="' + h(w.ref) + '">' + h(w.description || '') + '</option>').join('');
+    const refs = '<option value="' + refEst() + '">Estrutura do ano (administrativo, comercial, compras)</option>' + (D.obras || []).filter(ativa).map(w => '<option value="' + h(w.ref) + '">' + h(w.description || '') + '</option>').join('');   // v242
     const dias = []; for (let i = 0; i < 14; i++) { const d = new Date(); d.setDate(d.getDate() - i); dias.push(diaLocal(d)); }
     const seg = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return diaLocal(d); })();
     const semana = dias.filter(k => k >= seg).reduce((a, k) => a + totalDia(P[k], hj, k), 0);
     const nomeDia = k => (k === hj ? 'Hoje · ' : '') + new Date(k + 'T12:00:00').toLocaleDateString('pt-PT', { weekday: 'long', day: '2-digit', month: '2-digit' });
     m.innerHTML = topo() + '<div class="cartao"><label class="campo"><span>Pessoa</span><select id="tc">' + C.map(c => '<option value="' + h(c.id) + '"' + (c.id === tCid ? ' selected' : '') + '>' + h(c.nome) + (c.funcao ? ' — ' + h(c.funcao) : '') + '</option>').join('') + '</select></label>' +
       (ab ? '<p><b>Em curso</b> desde as ' + h(ab.e) + (ab.obra ? ' · ' + h(ab.obra) : '') + '</p><p class="linha"><button class="btn" data-tsai>⏹ Saída agora (' + h(agoraHM()) + ')</button></p>'
-        : '<label class="campo"><span>Obra (opcional)</span><input id="to" list="tlo" value="' + h(tObra) + '" placeholder="Referência da obra"></label><datalist id="tlo">' + refs + '</datalist><p class="linha"><button class="btn" data-tent>▶ Entrada agora (' + h(agoraHM()) + ')</button></p>') +
+        : '<label class="campo"><span>Obra (opcional)</span><input id="to" list="tlo" value="' + h(tObra) + '" placeholder="Referência da obra"></label><datalist id="tlo">' + refs + '</datalist><label class="campo"><span>Fase</span>' + faseSel('tfa', tFase) + '</label><p class="linha"><button class="btn" data-tent>▶ Entrada agora (' + h(agoraHM()) + ')</button></p>') +
       '<p class="linha"><button class="btn sec peq" data-tnovo>+ Lançar tempo à mão</button><button class="btn sec peq" data-ttipo>Falta, férias, baixa ou folga</button></p></div>' +
       '<div class="cartao"><h3>Últimos 14 dias · esta semana ' + fmtT(semana) + '</h3>' + dias.map(k => { const r = P[k], tm = totalDia(r, hj, k); if (!r || (!(r.marcas || []).length && !r.tipo && !r.nota)) return '';
         return '<div style="border-top:1px solid var(--linha);padding:6px 0"><div class="sec-t"><b>' + h(nomeDia(k)) + '</b><span>' + (tm ? fmtT(tm) : '') + '</span></div>' + (r.tipo ? '<span class="chip am">' + h(TIPOP[r.tipo] || r.tipo) + '</span>' : '') + (r.nota ? '<div class="s">' + h(r.nota) + '</div>' : '') +
-          (r.marcas || []).map(x => '<div class="linha" style="justify-content:space-between;margin:3px 0"><span>' + h(x.e) + '–' + h(x.s || 'em curso') + (x.obra ? ' · <b>' + h(x.obra) + '</b>' : '') + ' <span class="s">' + (x.origem === 'telemóvel' ? 'telemóvel' : 'PC') + (x.pend ? ' · por passar ao PC' : '') + '</span></span>' +
+          (r.marcas || []).map(x => '<div class="linha" style="justify-content:space-between;margin:3px 0"><span>' + h(x.e) + '–' + h(x.s || 'em curso') + (x.obra ? ' · <b>' + h(x.obra) + '</b>' : '') + (x.fase ? ' · ' + h(x.fase) : '') + ' <span class="s">' + (x.origem === 'telemóvel' ? 'telemóvel' : 'PC') + (x.pend ? ' · por passar ao PC' : '') + '</span></span>' +
             (x.id ? '<span><button class="btn sec peq" data-tedit="' + h(k) + '|' + h(x.id) + '">✎</button> <button class="btn sec peq" data-ttir="' + h(k) + '|' + h(x.id) + '">✖</button></span>' : '') + '</div>').join('') + '</div>'; }).join('') +
       '<p class="nota">Vai para o Registo de ponto do PC (Recursos Humanos). As marcas feitas no PC corrigem-se no PC. Nada se apaga: as correções ficam registadas.</p></div>';
     $('#tc').onchange = ev => { tCid = ev.target.value; try { localStorage.setItem('gv_t_cid', tCid); } catch (_) { } vTempos(m); };
     const to = $('#to'); if (to) to.oninput = () => { tObra = to.value; };
     m.onclick = async e => {
-      if (e.target.closest('[data-tent]')) { tObra = ($('#to') || {}).value || ''; await gravarPonto({ cid: tCid, dia: hj, acao: 'marca', marcaId: 't' + novoId(), e: agoraHM(), s: '', obraRef: tObra.trim().toUpperCase() }); return desenhar(); }
-      if (e.target.closest('[data-tsai]')) { const s = agoraHM(); await gravarPonto(ab.id ? { cid: tCid, dia: hj, acao: 'marca', marcaId: ab.id, e: ab.e, s, obraRef: ab.obra || '' } : { cid: tCid, dia: hj, acao: 'fecha', s }); return desenhar(); }
+      if (e.target.closest('[data-tent]')) { tObra = ($('#to') || {}).value || ''; tFase = ($('#tfa') || {}).value || ''; try { localStorage.setItem('gv_t_fase', tFase); } catch (_) { } await gravarPonto({ cid: tCid, dia: hj, acao: 'marca', marcaId: 't' + novoId(), e: agoraHM(), s: '', obraRef: tObra.trim().toUpperCase(), fase: tFase }); return desenhar(); }
+      if (e.target.closest('[data-tsai]')) { const s = agoraHM(); await gravarPonto(ab.id ? { cid: tCid, dia: hj, acao: 'marca', marcaId: ab.id, e: ab.e, s, obraRef: ab.obra || '', fase: ab.fase || '' } : { cid: tCid, dia: hj, acao: 'fecha', s }); return desenhar(); }
       if (e.target.closest('[data-tnovo]')) return formTempo(tCid, hj, null);
       if (e.target.closest('[data-ttipo]')) return formTipoDia(tCid, hj, P);
       const ed = e.target.closest('[data-tedit]'); if (ed) { const [k, id] = ed.dataset.tedit.split('|'); const x = ((P[k] || {}).marcas || []).find(y => y.id === id); if (x) formTempo(tCid, k, x); return; }
@@ -1382,12 +1390,13 @@
   }
   function formTempo(cid, dia, x) {
     const ant = aba, nome = ((D.colaboradores || []).find(c => c.id === cid) || {}).nome || '';
-    const refs = (D.obras || []).filter(ativa).map(w => '<option value="' + h(w.ref) + '">' + h(w.description || '') + '</option>').join('');
+    const refs = '<option value="' + refEst() + '">Estrutura do ano (administrativo, comercial, compras)</option>' + (D.obras || []).filter(ativa).map(w => '<option value="' + h(w.ref) + '">' + h(w.description || '') + '</option>').join('');   // v242
     ecraExtra = m => {
       m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + (x ? 'Corrigir tempo' : 'Lançar tempo') + '</h2><p><b>' + h(nome) + '</b></p>' +
         '<label class="campo"><span>Dia</span><input type="date" id="fd" value="' + h(dia) + '"' + (x ? ' disabled' : '') + '></label>' +
         '<div class="linha"><label class="campo" style="flex:1"><span>Entrada</span><input type="time" id="fe" value="' + h(x ? x.e : '') + '"></label><label class="campo" style="flex:1"><span>Saída</span><input type="time" id="fs" value="' + h(x ? x.s : '') + '"></label></div>' +
         '<label class="campo"><span>Obra (opcional)</span><input id="fo" list="flo" value="' + h(x ? x.obra : tObra) + '" placeholder="Referência da obra"></label><datalist id="flo">' + refs + '</datalist>' +
+        '<label class="campo"><span>Fase</span>' + faseSel('ffa', x ? (x.fase || '') : tFase) + '</label>' +   // v242
         '<p class="erro" id="fer"></p><p class="linha"><button class="btn" data-fg>Gravar</button></p><p class="nota">Saída vazia = ainda em curso. ' + (gLigado() ? 'Vai logo para o PC.' : '') + '</p></div>';
       m.onclick = async e => {
         if (e.target.closest('.voltar')) { ecraExtra = null; aba = ant; return desenhar(); }
@@ -1396,8 +1405,8 @@
         if (!d) return $('#fer').textContent = 'Escolha o dia.';
         if (!a) return $('#fer').textContent = 'Indique a hora de entrada.';
         if (b && minT(b) < minT(a) && !confirm('A saída (' + b + ') é antes da entrada (' + a + '): conta como passagem da meia-noite. Continuar?')) return;
-        if (o && !obraPorRef(o) && !confirm('Não encontrei a obra ' + o + ' na lista. Gravar mesmo assim?')) return;
-        await gravarPonto({ cid, dia: d, acao: 'marca', marcaId: x ? x.id : 't' + novoId(), e: a, s: b || '', obraRef: o });
+        if (o && !obraPorRef(o) && !/^\d{2}COM000$/.test(o) && !confirm('Não encontrei a obra ' + o + ' na lista. Gravar mesmo assim?')) return;
+        await gravarPonto({ cid, dia: d, acao: 'marca', marcaId: x ? x.id : 't' + novoId(), e: a, s: b || '', obraRef: o, fase: ($('#ffa') || {}).value || '' });
         ecraExtra = null; aba = 'tempos'; desenhar();
       };
     };
