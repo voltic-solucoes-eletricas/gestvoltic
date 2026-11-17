@@ -4,10 +4,12 @@
    as anotações saem só quando o Jorge carrega em «Guardar anotações» e escolhe a pasta do OneDrive.
    v207: dados da nota nos campos, escrita à mão, análise (proposta, agenda, tarefa), impressão digital e aviso de versão nova.
    v208: atalhos no ícone (nota, voz, tarefas, agenda, ferramentas) e aba Agenda com as marcações do PC (só para ver).
-   v209: retirar e repor notas (nunca se apaga), Potência no PTD (dados abertos E-REDES; GPS opcional) e simulador de garagem igual ao do PC. */
+   v209: retirar e repor notas (nunca se apaga), Potência no PTD (dados abertos E-REDES; GPS opcional) e simulador de garagem igual ao do PC.
+   v237: vários filtros ao mesmo tempo nas Propostas; borracha e desfazer na escrita à mão; «Gravar» envia logo para o PC pelo Google Drive;
+   separador Fornecedores; «A tratar» com o ecrã inicial do PC (tudo clicável, só para ler); a conta Google lembrada (sem escolher conta). */
 (() => {
   'use strict';
-  const VERSAO = '236';
+  const VERSAO = '237';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const eur = v => (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
@@ -46,7 +48,8 @@
   /* ---------------------------------------------------------------- estado */
   let D = null;          // dados do PC (Voltic_movel.json)
   let N = [];            // anotações deste aparelho
-  let aba = 'avisos', ecraExtra = null, filtroEstado = 'Ativas', procura = { p: '', c: '' };
+  let aba = 'avisos', ecraExtra = null, procura = { p: '', c: '', f: '' };
+  let filtros = (() => { try { const x = JSON.parse(localStorage.getItem('gv_filtros') || 'null'); if (Array.isArray(x)) return x; } catch (_) { } return ['Ativas']; })();   // v237: vários filtros
   async function guardarDados() { await gravar('dados', await cifrar(D)); }
   async function guardarNotas() { await gravar('notas', await cifrar(N)); }
 
@@ -133,7 +136,7 @@
   });
 
   /* ---------------------------------------------------------------- estrutura */
-  const ABAS = [['avisos', '🔔', 'Avisos'], ['agenda', '📅', 'Agenda'], ['propostas', '📄', 'Propostas'], ['clientes', '👥', 'Clientes'], ['catalogo', '📚', 'Catálogo'], ['ferramentas', '🧮', 'Ferramentas'], ['notas', '✏️', 'Anotações']];
+  const ABAS = [['avisos', '🔔', 'A tratar'], ['agenda', '📅', 'Agenda'], ['propostas', '📄', 'Propostas'], ['clientes', '👥', 'Clientes'], ['fornecedores', '🏭', 'Fornec.'], ['catalogo', '📚', 'Catálogo'], ['ferramentas', '🧮', 'Ferram.'], ['notas', '✏️', 'Notas']];   // v237: nomes curtos para caberem 8
   function principal() {
     raiz().innerHTML = '<header><h1 id="tit">GestVoltic</h1><button id="atu">⟳ Atualizar</button></header><main id="m"></main>' +
       '<nav class="abas">' + ABAS.map(([k, i, t]) => '<button data-aba="' + k + '"><b>' + i + '</b>' + t + '</button>').join('') + '</nav>' +
@@ -166,10 +169,11 @@
         '<p class="nota">O programa do PC atualiza esse ficheiro sozinho de 15 em 15 minutos. Se o OneDrive pedir, escolha «Manter sempre neste dispositivo».</p></div>';
       return;
     }
-    ({ avisos: vAvisos, agenda: vAgenda, propostas: vPropostas, clientes: vClientes, catalogo: vCatalogo, ferramentas: vFerramentas, notas: vNotas })[aba](m);
+    ({ avisos: vTratar, agenda: vAgenda, propostas: vPropostas, clientes: vClientes, fornecedores: vFornecedores, catalogo: vCatalogo, ferramentas: vFerramentas, notas: vNotas })[aba](m);   // v237
   }
   const velho = () => D && D.geradoEm && (Date.now() - new Date(D.geradoEm).getTime() > 2 * 86400000);
-  const topo = () => D ? '<p class="nota">Dados do PC de ' + h(quando(D.geradoEm)) + (velho() ? ' — <b style="color:#b3261e">têm mais de 2 dias: carregue em ⟳ Atualizar</b>' : '') + '</p>' : '';
+  const COD237 = { avisos: 'M001 · A tratar', agenda: 'M002 · Agenda', propostas: 'M003 · Propostas', clientes: 'M004 · Clientes', fornecedores: 'M005 · Fornecedores', catalogo: 'M006 · Catálogo', ferramentas: 'M007 · Ferramentas', notas: 'M008 · Notas' };   // v237: códigos dos ecrãs (índice H900 do PC)
+  const topo = () => D ? '<p class="nota"><b>' + h(COD237[aba] || '') + '</b> · Dados do PC de ' + h(quando(D.geradoEm)) + (velho() ? ' — <b style="color:#b3261e">têm mais de 2 dias: carregue em ⟳ Atualizar</b>' : '') + '</p>' : '';
 
   /* ---------------------------------------------------------------- avisos */
   function vAvisos(m) {
@@ -201,20 +205,24 @@
     return '<span class="chip ' + cls + '">' + h(s) + (w.state === 'Adjudicada' && w.stage ? ' · ' + h(w.stage) : '') + '</span>';
   };
   function vPropostas(m) {
-    const FS = ['Ativas', 'Em preparação', 'Enviada / em análise', 'Adjudicada', 'Todas'];
+    const FS = ['Ativas', 'Em preparação', 'Enviada / em análise', 'Enviada – espera resposta', 'Adjudicada', 'Não adjudicada'];
+    const NOME = { 'Enviada / em análise': 'Enviadas', 'Enviada – espera resposta': 'Espera resposta', 'Adjudicada': 'Adjudicadas', 'Não adjudicada': 'Não adjudicadas' };
+    const passa = (f, w) => f === 'Ativas' ? ativa(w) : w.state === f;
     const q = sem(procura.p);
     let ws = (D.obras || []).slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || b.id - a.id);
-    if (filtroEstado === 'Ativas') ws = ws.filter(ativa); else if (filtroEstado !== 'Todas') ws = ws.filter(w => w.state === filtroEstado);
+    const todasW = ws;
+    if (filtros.length) ws = ws.filter(w => filtros.some(f => passa(f, w)));   // v237: basta cumprir um dos filtros escolhidos
     if (q) ws = ws.filter(w => sem([w.ref, w.description, cliente(w.client).name, w.finalClient, w.site, w.finalClientPhone, w.notesV34].join(' ')).includes(q));
     m.innerHTML = topo() + '<input type="search" id="q" placeholder="Procurar referência, cliente, morada…" value="' + h(procura.p) + '">' +
-      '<div class="filtros" style="margin-top:8px">' + FS.map(f => '<button data-f="' + h(f) + '" class="' + (f === filtroEstado ? 'on' : '') + '">' + h(f === 'Enviada / em análise' ? 'Enviadas' : f) + '</button>').join('') + '</div>' +
+      '<div class="filtros" style="margin-top:8px"><button data-f="" class="' + (filtros.length ? '' : 'on') + '">Todas</button>' + FS.map(f => '<button data-f="' + h(f) + '" class="' + (filtros.includes(f) ? 'on' : '') + '">' + (filtros.includes(f) ? '✓ ' : '') + h(NOME[f] || f) + ' (' + todasW.filter(w => passa(f, w)).length + ')</button>').join('') + '</div>' +
+      '<p class="nota" style="margin:0 0 4px">Pode escolher vários filtros; «Todas» limpa a escolha.</p>' +
       '<p class="nota">' + ws.length + ' proposta(s)</p><ul class="lista">' + ws.slice(0, 200).map(w =>
         '<li class="toque" data-id="' + w.id + '"><div class="t">' + h(w.ref) + ' · ' + h(w.description || '') + '</div><div class="s">' + h(cliente(w.client).name || '') +
         (w.finalClient ? ' · ' + h(w.finalClient) : '') + '</div><div>' + estadoChip(w) + ' <span class="s">' + h(dpt(w.date)) + (w.proposed ? ' · ' + eur(w.proposed) : '') + '</span></div></li>').join('') + '</ul>' +
       (ws.length > 200 ? '<p class="nota">Mostra as 200 mais recentes: use a procura.</p>' : '');
     const q2 = $('#q'); q2.oninput = () => { procura.p = q2.value; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vPropostas(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
     m.onclick = e => {
-      const f = e.target.closest('[data-f]'); if (f) { filtroEstado = f.dataset.f; return vPropostas(m); }
+      const f = e.target.closest('[data-f]'); if (f) { const v = f.dataset.f; filtros = !v ? [] : filtros.includes(v) ? filtros.filter(x => x !== v) : [...filtros, v]; try { localStorage.setItem('gv_filtros', JSON.stringify(filtros)); } catch (_) { } return vPropostas(m); }
       const li = e.target.closest('li[data-id]'); if (li) abrirObra((D.obras || []).find(w => String(w.id) === li.dataset.id));
     };
   }
@@ -316,12 +324,12 @@
   }
   function vNotas(m) {
     const porGuardar = vivas().filter(n => !n.guardadaEm || n.alterada > n.guardadaEm);
-    m.innerHTML = '<p class="linha">' + (FILA ? '<button class="btn" data-recebidas>📥 Fotografias recebidas (' + FILA + ')</button>' : '') + '<button class="btn" data-voz>🎤 Nota por voz</button><button class="btn" data-nova>+ Nova anotação</button><button class="btn sec" data-guardar' + (porGuardar.length ? '' : ' disabled') + '>⤴ Guardar anotações (' + porGuardar.length + ')</button></p>' +
-      (gLigado() ? '<p class="nota">Ligado ao Google Drive: as anotações passam sozinhas para o PC (<span id="gsinc">' + h(gEstado || '…') + '</span>).</p>' : '<p class="nota">«Guardar anotações» cria um ficheiro: escolha a pasta <b>GestVoltic_movel › anotacoes</b>. Para passar sozinho, ligue ao Google Drive em Ferramentas › Entrada e versão.</p>') +   // v236
+    m.innerHTML = '<p class="linha">' + (FILA ? '<button class="btn" data-recebidas>📥 Fotografias recebidas (' + FILA + ')</button>' : '') + '<button class="btn" data-voz>🎤 Nota por voz</button><button class="btn" data-nova>+ Nova anotação</button>' + (gLigado() ? (porGuardar.length ? '<button class="btn sec" data-guardar>⤴ Enviar agora (' + porGuardar.length + ')</button>' : '') : '<button class="btn sec" data-guardar' + (porGuardar.length ? '' : ' disabled') + '>⤴ Guardar anotações (' + porGuardar.length + ')</button>') + '</p>' +
+      (gLigado() ? '<p class="nota">☁ Ligado ao Google Drive: ao gravar, a anotação vai logo para o PC e fica lá guardada (<span id="gsinc">' + h(gEstado || '…') + '</span>).</p>' : '<p class="nota">«Guardar anotações» cria um ficheiro: escolha a pasta <b>GestVoltic_movel › anotacoes</b>. Para passar sozinho, ligue ao Google Drive em Ferramentas › Entrada e versão.</p>') +   // v236
       tarefasHtml() + blocoPC() + (vivas().filter(n => n.tipoNota !== 'agenda').length ? '<ul class="lista">' + vivas().filter(n => n.tipoNota !== 'agenda').sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
         '<li class="toque" data-nota="' + h(n.id) + '"><div class="t">' + (n.ref ? h(n.ref) + ' · ' : '') + h(n.assunto || n.nome || 'Anotação') + '</div><div class="s">' + h(quando(n.criada)) +
         (n.telefone ? ' · ' + h(n.telefone) : '') + (n.desenho ? ' · ✏️' : '') + (n.fotos?.length ? ' · 📷' + n.fotos.length : '') + '</div><div>' +
-        (!n.guardadaEm ? '<span class="chip am">por guardar</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — por guardar</span>' : '<span class="chip ok">guardada ' + h(quando(n.guardadaEm)) + '</span>') + chipAnalise(n) + '</div></li>').join('') + '</ul>'
+        (!n.guardadaEm ? '<span class="chip am">' + (gLigado() ? 'por enviar ao PC' : 'por guardar') + '</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — ' + (gLigado() ? 'por enviar ao PC' : 'por guardar') + '</span>' : '<span class="chip ok">' + (gLigado() ? 'no PC desde ' : 'guardada ') + h(quando(n.guardadaEm)) + '</span>') + chipAnalise(n) + '</div></li>').join('') + '</ul>'
         : '<div class="cartao"><p>Ainda sem anotações. Use «+ Nova anotação» numa visita, ou abra uma proposta e carregue em «Anotar nesta proposta».</p></div>') + retiradasHtml();
     m.onclick = e => {
       const rp = e.target.closest('[data-repor]'); if (rp) return reporNota(rp.dataset.repor);   // v209
@@ -582,7 +590,7 @@
       '<p class="nota">Telefone: fixo 2xx ou móvel 91, 92, 93 ou 96. Números depois de NIF ou NIPC não contam.</p></details>';
   }
   const vazioC = cv => !cv.width || !cv.height || vazio(cv);
-  function maoHtml(n) { return '<details id="mao"' + (n.desenho ? ' open' : '') + '><summary><b>✍ Escrever à mão</b></summary><canvas class="desenho" id="cvr" style="height:260px"></canvas><p class="linha"><button class="btn sec peq" data-limparmao>Limpar</button><span class="nota">Escreva com a caneta ou o dedo.</span></p></details>'; }
+  function maoHtml(n) { return '<details id="mao"' + (n.desenho ? ' open' : '') + '><summary><b>✍ Escrever à mão</b></summary><p class="linha mao-barra" id="maob"></p><canvas class="desenho" id="cvr" style="height:260px"></canvas><p class="linha"><button class="btn sec peq" data-limparmao>Limpar tudo</button><span class="nota">Escreva com a caneta ou o dedo. A borracha apaga só onde passar.</span></p></details>'; }
   function maoLigar(m, n) {
     const cv = m.querySelector('#cvr'), ctx = cv.getContext('2d');
     let mexeu = false, traco = false, limpo = false;
@@ -594,10 +602,7 @@
     };
     m.querySelector('#mao').addEventListener('toggle', () => { if (!mexeu) ajusta(); });
     ajusta();
-    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-    cv.onpointerdown = e => { traco = true; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineWidth = e.pointerType === 'pen' ? Math.max(1.2, (e.pressure || .5) * 3.2) : 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; };
-    cv.onpointermove = e => { if (!traco) return; const [x, y] = pos(e); if (e.pointerType === 'pen') ctx.lineWidth = Math.max(1.2, (e.pressure || .5) * 3.2); ctx.lineTo(x, y); ctx.stroke(); mexeu = true; };
-    cv.onpointerup = cv.onpointercancel = () => { traco = false; };
+    tracos(cv, ctx, () => { mexeu = true; }, m.querySelector('#maob'));   // v237: caneta, borracha e desfazer
     m.querySelector('[data-limparmao]').onclick = () => { limpo = true; mexeu = true; ajusta(); };
     return { mexeu: () => mexeu, url: () => vazioC(cv) ? '' : cv.toDataURL('image/png'), tem: () => mexeu ? !vazioC(cv) : !!n.desenho };
   }
@@ -722,14 +727,14 @@
     ecraExtra = m => {
       const obras = (D?.obras || []).map(w => '<option value="' + h(w.ref) + '">' + h(w.description || '') + '</option>').join('');
       const clis = (D?.clientes || []).map(x => '<option value="' + h(x.name) + '">').join('');
-      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>Nota rápida</h2>' + c('titulo', 'Título (opcional)') +
+      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>Nota rápida <small class="nota">M101</small></h2>' + c('titulo', 'Título (opcional)') +
         '<label class="campo"><span>Texto</span><textarea data-k="texto" id="vt">' + h(n.texto) + '</textarea></label>' +
         '<p class="linha"><button class="btn sec" data-ouvir>🎤 Falar</button><span class="nota" id="vs"></span></p>' + maoHtml(n) + contactoHtml(n) +
         '<label class="campo"><span>Estado</span><select data-k="estado">' + [['pendente', 'Pendente'], ['em análise', 'Em análise'], ['concluído', 'Concluído']].map(([v, t]) => '<option value="' + v + '"' + (v === n.estado ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></label>' +
         c('responsavel', 'Responsável') + c('prazo', 'Prazo', 'date') +
         c('ref', 'Obra / proposta (vazio = avulsa)', 'text', 'list="vlo"') + c('cliente', 'Cliente', 'text', 'list="vlc"') + c('fornecedor', 'Fornecedor') +
         '<datalist id="vlo">' + obras + '</datalist><datalist id="vlc">' + clis + '</datalist>' +
-        analiseHtml(n) + '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button>' + botaoRetirar(n) + '</p><p class="nota">Corrija o texto antes de gravar. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
+        analiseHtml(n) + '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar</button>' + botaoRetirar(n) + '</p><p class="nota">Corrija o texto antes de gravar. ' + notaGravar() + '</p></div>';
       const estado = t => { const e = $('#vs'); if (e) e.textContent = t; };
       const mao = maoLigar(m, n); ligarAnalise(m);   // v207
       const botao = () => m.querySelector('[data-ouvir]');
@@ -756,7 +761,7 @@
           parar();
           m.querySelectorAll('[data-k]').forEach(x => { n[x.dataset.k] = x.value.trim(); });
           if (!n.titulo && !n.texto && !mao.tem()) return estado('Escreva, diga ou desenhe alguma coisa.');
-          if (!n.revistoV207) { const msg = retirar(n, m, true); if (msg) { n.revistoV207 = true; return estado(msg + ' Confirme e carregue outra vez em «Gravar no aparelho».'); } }
+          if (!n.revistoV207) { const msg = retirar(n, m, true); if (msg) { n.revistoV207 = true; return estado(msg + ' Confirme e carregue outra vez em «Gravar».'); } }
           delete n.revistoV207;
           m.querySelectorAll('[data-k]').forEach(x => { n[x.dataset.k] = x.value.trim(); });
           n.analise = lerAnalise(m, n);
@@ -780,7 +785,7 @@
     const ant = aba, antExtra = ecraExtra;
     const c = (k, rot, tipo = 'text', extra = '') => '<label class="campo"><span>' + rot + '</span><input data-k="' + k + '" type="' + tipo + '" value="' + h(n[k]) + '" ' + extra + '></label>';
     ecraExtra = m => {
-      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + (n.ref ? 'Anotação — ' + h(n.ref) : 'Nova anotação (visita)') + '</h2>' +
+      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + (n.ref ? 'Anotação — ' + h(n.ref) : 'Nova anotação (visita)') + ' <small class="nota">M100</small></h2>' +
         '<p class="nota">Pode escrever com a caneta em qualquer campo: o teclado do Android passa a escrita a texto.</p>' +
         (!n.ref ? c('assunto', 'Assunto (ex.: Posto de carregamento, quadro elétrico…)') : '') +
         c('nome', 'Nome') + c('telefone', 'Telefone', 'tel') + c('email', 'Email', 'email') + c('morada', 'Morada') +
@@ -791,19 +796,16 @@
         '<div style="flex:1;min-width:120px">' + c('metros', 'Metros de cabo', 'text', 'inputmode="decimal"') + '</div></div>' +
         '<label class="campo"><span>Notas</span><textarea data-k="texto">' + h(n.texto) + '</textarea></label>' +
         '<p class="linha"><button class="btn sec peq" data-retirar>🔎 Retirar dados do texto</button><span class="nota" id="vs2"></span></p>' +
-        '<label class="campo"><span>Desenho à mão</span></label><canvas class="desenho" id="cv"></canvas><p class="linha"><button class="btn sec peq" data-limpar>Limpar desenho</button><span class="nota">Desenhe com a caneta ou o dedo.</span></p>' +
+        '<label class="campo"><span>Desenho à mão</span></label><p class="linha mao-barra" id="cvb"></p><canvas class="desenho" id="cv"></canvas><p class="linha"><button class="btn sec peq" data-limpar>Limpar tudo</button><span class="nota">Desenhe com a caneta ou o dedo. A borracha apaga só onde passar.</span></p>' +
         '<label class="campo"><span>Fotografias</span></label><p class="linha"><button class="btn sec peq" data-foto="#ffc">📷 Tirar fotografia</button><button class="btn sec peq" data-foto="#ff">🖼 Escolher da galeria</button></p><input type="file" id="ffc" accept="image/*" capture="environment" hidden><input type="file" id="ff" accept="image/*" multiple hidden><div class="fotos" id="fts"></div>' +
-        '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button>' + botaoRetirar(n) + '</p><p class="nota">Fica guardada (cifrada) neste aparelho. Depois use «Guardar anotações» para a passar ao PC.</p></div>';
+        '<p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar</button>' + botaoRetirar(n) + '</p><p class="nota">' + notaGravar() + '</p></div>';
       const desenhaFotos = () => { $('#fts').innerHTML = (n.fotos || []).map((f, i) => '<div><img src="' + f + '"><button data-tira="' + i + '">×</button></div>').join(''); };
       desenhaFotos();
       const cv = $('#cv'), ctx = cv.getContext('2d');
       const ajusta = () => { const r = cv.getBoundingClientRect(), k = window.devicePixelRatio || 1; cv.width = Math.round(r.width * k); cv.height = Math.round(r.height * k); ctx.setTransform(k, 0, 0, k, 0, 0); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, r.width, r.height); if (n.desenho) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, r.width, r.height); im.src = n.desenho; } };
       ajusta();
-      let traco = false, mexeu = false;
-      const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
-      cv.onpointerdown = e => { traco = true; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineWidth = e.pointerType === 'pen' ? Math.max(1.2, (e.pressure || .5) * 3.2) : 2.4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#111'; };
-      cv.onpointermove = e => { if (!traco) return; const [x, y] = pos(e); if (e.pointerType === 'pen') ctx.lineWidth = Math.max(1.2, (e.pressure || .5) * 3.2); ctx.lineTo(x, y); ctx.stroke(); mexeu = true; };
-      cv.onpointerup = cv.onpointercancel = () => { traco = false; };
+      let mexeu = false;
+      tracos(cv, ctx, () => { mexeu = true; }, $('#cvb'));   // v237: caneta, borracha e desfazer
       $('#ff').onchange = $('#ffc').onchange = async ev => {
         emCamara = false;
         for (const f of ev.target.files) { try { n.fotos.push(await reduzir(f)); } catch (_) { alert('Não consegui ler a fotografia ' + f.name); } }
@@ -884,8 +886,9 @@
     if (gValido()) return gTok;
     await gScript();
     return new Promise((ok, falha) => {
-      if (!gCliente) gCliente = google.accounts.oauth2.initTokenClient({ client_id: GCLIENTE, scope: GESCOPO, callback: () => { } });
-      gCliente.callback = r => { if (r.error) return falha(new Error(r.error)); gTok = r.access_token; gExp = Date.now() + (Number(r.expires_in) || 3600) * 1000; try { localStorage.setItem('gv_google', '1'); } catch (_) { } ok(gTok); };
+      const conta = gConta();   // v237: a conta fica lembrada neste aparelho e vai como sugestão, para o Google não pedir para a escolher
+      if (!gCliente || gCliente._conta !== conta) { gCliente = google.accounts.oauth2.initTokenClient(Object.assign({ client_id: GCLIENTE, scope: GESCOPO, callback: () => { } }, conta ? { hint: conta, login_hint: conta } : {})); gCliente._conta = conta; }
+      gCliente.callback = r => { if (r.error) return falha(new Error(r.error)); gTok = r.access_token; gExp = Date.now() + (Number(r.expires_in) || 3600) * 1000; try { localStorage.setItem('gv_google', '1'); } catch (_) { } if (!conta) gLembrarConta(); ok(gTok); };
       gCliente.error_callback = e => falha(new Error(e && e.type === 'popup_closed' ? 'janela do Google fechada' : (e && e.type) || 'cancelado'));
       gCliente.requestAccessToken({ prompt: primeira ? 'consent' : '' });
     });
@@ -931,18 +934,21 @@
     if (!gLigado() || gSinc || !CHAVE) return;
     gSinc = true;
     try {
-      if (!gValido()) { if (!interativo) { gEstado = 'toque no ecrã para sincronizar'; return; } await gToken(false); }
+      if (!gValido()) { if (!interativo) { gEstado = 'por sincronizar — carregue em ⟳ Atualizar'; return; } await gToken(false); }
       const env = await gEnviar(), rec = await gReceber();
       gEstado = 'sincronizado às ' + hm() + (env ? ' · ' + env + ' enviada(s)' : '') + (rec ? ' · dados do PC recebidos' : '');
       if (env || rec) desenhar();
+      if (env && !avisar) aviso('✔ Enviada para o PC às ' + hm());   // v237
       if (avisar) alert('Sincronizado com o PC pelo Google Drive.' + (env ? '\n' + env + ' anotação(ões) enviada(s).' : '') + (rec ? '\nDados do PC atualizados.' : '\nOs dados do PC já estavam em dia.'));
-    } catch (err) { gEstado = 'por sincronizar: ' + err.message; if (avisar) alert('Não foi possível sincronizar: ' + err.message); }
+    } catch (err) { gEstado = 'por sincronizar: ' + err.message; if (avisar) alert('Não foi possível sincronizar: ' + err.message); else if (porEnviar()) aviso('Gravada. Vai para o PC quando houver rede.'); }
     finally { gSinc = false; const t = document.getElementById('gsinc'); if (t) t.textContent = gEstado; }
   }
   const _gGuardarNotas = guardarNotas;
-  guardarNotas = async function () { await _gGuardarNotas(); if (gLigado() && !gSinc) setTimeout(() => sincronizar(false), 1500); };
+  /* v237: ao gravar envia logo (se o toque foi agora, pode renovar a autorização); já não abre o Google a cada toque no ecrã */
+  guardarNotas = async function () { await _gGuardarNotas(); if (gLigado() && !gSinc) setTimeout(() => sincronizar(Date.now() - ultimoToque < 4000), 200); };
   setInterval(() => sincronizar(false), 2 * 60 * 1000);
-  document.addEventListener('click', () => { if (gLigado() && CHAVE && !gValido() && !gSinc) sincronizar(true); }, true);
+  let ultimoToque = 0;
+  document.addEventListener('click', () => { ultimoToque = Date.now(); }, true);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && gValido()) setTimeout(() => sincronizar(false), 800); });
 
   /* ---------------------------------------------------------------- v236: marcações na agenda feitas no telemóvel */
@@ -1044,7 +1050,7 @@
         '<input type="file" id="rc" accept="image/*" capture="environment" hidden><input type="file" id="rg" accept="image/*" multiple hidden>' +
         n.fotos.map((f, i) => '<div class="linha" style="align-items:flex-start;margin-bottom:8px"><img src="' + f + '" alt="Fotografia ' + (i + 1) + '" style="width:96px;height:96px;object-fit:cover;border-radius:8px"><div style="flex:1;min-width:150px"><input type="text" data-fo="' + i + '" placeholder="Observação desta fotografia" value="' + h(n.fotoObs[i] || '') + '"><button class="btn sec peq" style="margin-top:6px" data-retira="' + i + '">Retirar</button></div></div>').join('') +
         (n.retiradas.length ? '<details><summary>Retiradas (' + n.retiradas.length + ')</summary>' + n.retiradas.map((f, i) => '<div class="linha" style="margin:6px 0"><img src="' + f.img + '" alt="Fotografia retirada" style="width:64px;height:64px;object-fit:cover;border-radius:8px"><button class="btn sec peq" data-repoe="' + i + '">Repor</button></div>').join('') + '</details>' : '') +
-        '<p class="erro" id="re"></p><p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar no aparelho</button>' + botaoRetirar(n) + '</p><p class="nota">Fica guardado (cifrado) neste aparelho. Depois use «Guardar anotações» para o passar ao PC; lá carrega em «Importar para o relatório».</p></div>';
+        '<p class="erro" id="re"></p><p class="linha" style="margin-top:14px"><button class="btn" data-gravar>Gravar</button>' + botaoRetirar(n) + '</p><p class="nota">' + notaGravar() + ' No PC carrega em «Importar para o relatório».</p></div>';
       const ler = () => {
         m.querySelectorAll('[data-k]').forEach(x => { n[x.dataset.k] = x.value.trim(); });
         m.querySelectorAll('[data-c]').forEach(x => { n.campos[x.dataset.c] = x.value.trim(); });
@@ -1128,6 +1134,121 @@
           FILA = 0; fim(); editarRelatorio(n);
         } catch (err) { alert('Não foi possível juntar as fotografias: ' + err.message); }
         finally { delete m.dataset.ocupado; }
+      };
+    };
+    desenhar(); window.scrollTo(0, 0);
+  }
+
+  /* ---------------------------------------------------------------- v237 */
+  const estilo237 = document.createElement('style');
+  estilo237.textContent = '.mao-barra{margin:0 0 6px}.mao-barra button{border:1px solid #9fb3bf;background:#fff;border-radius:20px;padding:5px 12px;font-size:13px}.mao-barra button.on{background:var(--azul2);border-color:var(--azul2);color:#fff}' +
+    'nav.abas button{font-size:10px;min-width:0;overflow:hidden;text-overflow:ellipsis}nav.abas button b{font-size:19px}' +
+    '.num.toque{cursor:pointer;border:1px solid transparent}.num.toque:active{border-color:var(--azul2)}.sec-t{display:flex;justify-content:space-between;align-items:center;gap:8px}' +
+    '#gvaviso{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;z-index:9;background:#17323f;color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;box-shadow:0 4px 12px #0004;max-width:92vw}';
+  document.head.append(estilo237);
+  function aviso(t) { let a = document.getElementById('gvaviso'); if (!a) { a = document.createElement('div'); a.id = 'gvaviso'; document.body.append(a); } a.textContent = t; clearTimeout(a._t); a._t = setTimeout(() => a.remove(), 3500); }
+  const porEnviar = () => vivas().some(n => !n.guardadaEm || n.alterada > n.guardadaEm);
+  const notaGravar = () => gLigado() ? 'Ao gravar, vai logo para o PC pelo Google Drive e fica lá guardada (sem rede, vai assim que houver).' : 'Fica neste aparelho até usar «Guardar anotações» (ou ligue o Google Drive em Ferramentas para passar sozinho).';
+  /* conta Google lembrada (só neste aparelho) */
+  const gConta = () => { try { return localStorage.getItem('gv_g_conta') || ''; } catch (_) { return ''; } };
+  async function gLembrarConta() {
+    try { const r = await gApi('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)'); const j = await r.json(); const e = j && j.user && j.user.emailAddress; if (e) localStorage.setItem('gv_g_conta', e); } catch (_) { }
+  }
+  /* escrita à mão: caneta, borracha (apaga só onde passa) e desfazer */
+  function tracos(cv, ctx, mexe, barra) {
+    let modo = 'caneta', traco = false; const pilha = [];
+    const pos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const larg = e => modo === 'borracha' ? 22 : e.pointerType === 'pen' ? Math.max(1.2, (e.pressure || .5) * 3.2) : 2.4;
+    cv.onpointerdown = e => {
+      try { pilha.push(ctx.getImageData(0, 0, cv.width, cv.height)); if (pilha.length > 30) pilha.shift(); } catch (_) { }
+      traco = true; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineWidth = larg(e); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = modo === 'borracha' ? '#fff' : '#111';
+      if (modo === 'borracha') { ctx.lineTo(x + .01, y); ctx.stroke(); mexe(); }
+    };
+    cv.onpointermove = e => { if (!traco) return; const [x, y] = pos(e); if (modo !== 'borracha' && e.pointerType === 'pen') ctx.lineWidth = larg(e); ctx.lineTo(x, y); ctx.stroke(); mexe(); };
+    cv.onpointerup = cv.onpointercancel = () => { traco = false; };
+    if (!barra) return;
+    barra.innerHTML = '<button type="button" data-modo="caneta">✏️ Caneta</button><button type="button" data-modo="borracha">🧽 Borracha</button><button type="button" data-desfazer>↶ Desfazer</button>';
+    const pinta = () => barra.querySelectorAll('[data-modo]').forEach(b => b.classList.toggle('on', b.dataset.modo === modo));
+    barra.onclick = e => {
+      const b = e.target.closest('[data-modo]');
+      if (b) { e.stopPropagation(); modo = b.dataset.modo; return pinta(); }
+      if (e.target.closest('[data-desfazer]')) { e.stopPropagation(); const im = pilha.pop(); if (im && im.width === cv.width && im.height === cv.height) { ctx.putImageData(im, 0, 0); mexe(); } }
+    };
+    pinta();
+  }
+  /* ---------- Fornecedores ---------- */
+  function vFornecedores(m) {
+    const L0 = D.fornecedores;
+    if (!Array.isArray(L0)) { m.innerHTML = topo() + '<div class="cartao"><h2>Fornecedores</h2><p>O ficheiro do PC ainda não traz os fornecedores: instale no PC a versão 299 e carregue em ⟳ Atualizar.</p></div>'; return; }
+    const q = sem(procura.f);
+    let fs = L0.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt'));
+    if (q) fs = fs.filter(f => sem([f.name, f.nif, f.phone, f.email, f.address, f.town, ...(f.pessoas || []).map(p => p.nome + ' ' + p.tel + ' ' + p.email)].join(' ')).includes(q));
+    m.innerHTML = topo() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone, pessoa…" value="' + h(procura.f) + '"><p class="nota">' + fs.length + ' fornecedor(es)</p><ul class="lista">' +
+      fs.slice(0, 200).map(f => '<li class="toque" data-id="' + h(f.id) + '"><div class="t">' + h(f.name) + '</div><div class="s">' + h([f.phone, f.town, (f.pessoas || []).map(p => p.nome).filter(Boolean).join(', ')].filter(Boolean).join(' · ')) + '</div></li>').join('') + '</ul>' +
+      (fs.length > 200 ? '<p class="nota">Mostra os primeiros 200: use a procura.</p>' : '');
+    const q2 = $('#q'); q2.oninput = () => { procura.f = q2.value; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vFornecedores(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
+    m.onclick = e => { const li = e.target.closest('li[data-id]'); if (li) abrirFornecedor(L0.find(f => String(f.id) === li.dataset.id)); };
+  }
+  function abrirFornecedor(f) {
+    if (!f) return;
+    ecraExtra = m => {
+      const morada = [f.address, f.postal, f.town].filter(Boolean).join(', ');
+      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + h(f.name) + '</h2><dl class="det">' +
+        (f.nif ? '<dt>NIF</dt><dd>' + h(f.nif) + '</dd>' : '') + (f.phone ? '<dt>Telefone</dt><dd>' + tel(f.phone) + '</dd>' : '') + (f.email ? '<dt>Email</dt><dd>' + mail(f.email) + '</dd>' : '') +
+        (morada ? '<dt>Morada</dt><dd>' + mapa(morada) + '</dd>' : '') + '</dl></div>' +
+        ((f.pessoas || []).length ? '<div class="cartao"><h3>Pessoas (' + f.pessoas.length + ')</h3><ul class="lista">' + f.pessoas.map(p => '<li><div class="t">' + h(p.nome || '—') + '</div><div class="s">' + [p.tel ? tel(p.tel) : '', p.email ? mail(p.email) : ''].filter(Boolean).join(' · ') + '</div></li>').join('') + '</ul></div>' : '');
+      m.onclick = e => { if (e.target.closest('.voltar')) { ecraExtra = null; return desenhar(); } };
+    };
+    desenhar(); window.scrollTo(0, 0);
+  }
+  /* ---------- A tratar: o ecrã inicial do PC, tudo clicável e só para ler ---------- */
+  const REF237 = /^\d{2}[A-Z]{3}\d{3}$/;
+  const dataDe = s => { s = String(s || ''); let m = s.match(/(\d{4})-(\d{2})-(\d{2})/); if (m) return new Date(+m[1], m[2] - 1, +m[3]); m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], m[2] - 1, +m[1]) : null; };
+  const diasAte = d => { const h0 = new Date(); h0.setHours(0, 0, 0, 0); return Math.round((d - h0) / 864e5); };
+  function linhaHtml(cab, r) {
+    const ref = r.find(v => REF237.test(v) && obraPorRef(v)) || '';
+    r = r.map(v => /^\d{4}-\d{2}-\d{2}$/.test(v) ? dpt(v) : v);   // datas como no resto da app
+    const tit = r.find(Boolean) || '—', resto = r.map((v, i) => v && v !== tit ? (cab[i] ? cab[i] + ': ' : '') + v : '').filter(Boolean);
+    return '<li class="' + (ref ? 'toque' : '') + '" data-ref="' + h(ref) + '"><div class="t">' + h(tit) + '</div>' + (resto.length ? '<div class="s">' + h(resto.join(' · ')) + '</div>' : '') + '</li>';
+  }
+  function itensDe(s, c) {
+    if (c && c.estado) return { obras: (D.obras || []).filter(w => w.state === c.estado && (c.estado !== 'Adjudicada' || ativa(w))).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))) };
+    const tab = s => (s.tabelas || [])[0] || { cab: [], linhas: [] };
+    if (c && c.area) { const F = (P().seccoes.find(x => /^O que falta tratar/.test(x.t)) || {}); const tb = tab(F); return { cab: tb.cab.slice(1), linhas: tb.linhas.filter(r => r[0] === c.area).map(r => r.slice(1)) }; }   // a área já é o título
+    if (c && c.pagamentos) {
+      const T = (P().seccoes.find(x => /^Previsão de tesouraria/.test(x.t)) || {}).tabelas || [];
+      const tb = T.find(x => x.cab.some(k => /A quem/i.test(k))) || { cab: [], linhas: [] };
+      const ok = d => /atraso/i.test(c.t) ? d != null && d < 0 : /7 dias/.test(c.t) ? d != null && d >= 0 && d <= 7 : /15 dias/.test(c.t) ? d != null && d > 7 && d <= 15 : /sem data/i.test(c.t) ? d == null : true;
+      return { cab: tb.cab, linhas: tb.linhas.filter(r => { const x = dataDe(r[0]); return ok(x ? diasAte(x) : null); }), nota: 'Pagamentos da previsão de tesouraria do PC (lista completa no PC, em Pagamentos).' };
+    }
+    return { tabelas: s.tabelas || [], resumo: s.resumo || '' };
+  }
+  const P = () => (D && D.avisos && D.avisos.principalV299) || null;
+  function vTratar(m) {
+    const F = P();
+    if (!F) return vAvisos(m);   // ficheiro de um PC sem a v299: fica o quadro antigo
+    const nLinhas = s => (s.tabelas || []).reduce((a, t) => a + t.linhas.length, 0);
+    m.innerHTML = topo() + F.seccoes.map((s, i) => '<div class="cartao"><div class="sec-t"><h3>' + h(s.t) + '</h3>' + (s.tabelas && s.tabelas.length || s.resumo ? '<button class="btn sec peq" data-s="' + i + '">Ver ›</button>' : '') + '</div>' +
+      (s.cartoes.length ? '<div class="grelha">' + s.cartoes.map((c, j) => '<div class="num toque' + (/atraso/i.test(c.t) && parseFloat(c.n) > 0 ? ' alerta' : '') + '" data-s="' + i + '" data-c="' + j + '"><span>' + h(c.t) + '</span><b>' + h(c.n) + '</b></div>').join('') + '</div>'
+        : nLinhas(s) ? '<div class="num toque" data-s="' + i + '"><span>Na lista</span><b>' + nLinhas(s) + '</b></div>' : s.resumo ? '<p class="s toque" data-s="' + i + '">' + h(s.resumo.slice(0, 160)) + '</p>' : '<p class="nota">Nada por tratar.</p>') + '</div>').join('') +
+      '<p class="nota">Como no ecrã inicial do PC em ' + h(quando(F.em)) + '. Toque num quadrado para ver a lista (só para ler).</p>';
+    m.onclick = e => { const x = e.target.closest('[data-s]'); if (!x) return; const s = F.seccoes[+x.dataset.s]; abrirTratar(s, x.dataset.c != null ? s.cartoes[+x.dataset.c] : null); };
+  }
+  function abrirTratar(s, c) {
+    const ant = aba, antExtra = ecraExtra;
+    ecraExtra = m => {
+      const I = itensDe(s, c);
+      let corpo = '';
+      if (I.obras) corpo = I.obras.length ? '<ul class="lista">' + I.obras.map(w => '<li class="toque" data-id="' + w.id + '"><div class="t">' + h(w.ref) + ' · ' + h(w.description || '') + '</div><div class="s">' + h(cliente(w.client).name || '') + (w.finalClient ? ' · ' + h(w.finalClient) : '') + '</div><div>' + estadoChip(w) + ' <span class="s">' + h(dpt(w.date)) + (w.due ? ' · Ponto da situação ' + h(dpt(w.due)) : '') + '</span></div></li>').join('') + '</ul>' : '<p>Nada nesta lista.</p>';
+      else if (I.linhas) corpo = (I.linhas.length ? '<ul class="lista">' + I.linhas.map(r => linhaHtml(I.cab, r)).join('') + '</ul>' : '<p>Nada nesta lista.</p>') + (I.nota ? '<p class="nota">' + h(I.nota) + '</p>' : '');
+      else corpo = (I.resumo ? '<p>' + h(I.resumo) + '</p>' : '') + I.tabelas.map(tb => '<ul class="lista">' + tb.linhas.map(r => linhaHtml(tb.cab, r)).join('') + '</ul>').join('<hr>') || '<p>Nada nesta lista.</p>';
+      const n = I.obras ? I.obras.length : I.linhas ? I.linhas.length : (I.tabelas || []).reduce((a, t) => a + t.linhas.length, 0);
+      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + h(String(c ? c.t : s.t).replace(/\s*\(\d+\)\s*$/, '')) + ' (' + n + ')</h2><p class="nota">' + h(c ? s.t + ' · ' : '') + 'Só para ler — trata-se no PC.</p>' + corpo + '</div>';
+      m.onclick = e => {
+        if (e.target.closest('.voltar')) { ecraExtra = antExtra; aba = ant; return desenhar(); }
+        const li = e.target.closest('li[data-id]'); if (li) return abrirObra((D.obras || []).find(w => String(w.id) === li.dataset.id));
+        const lr = e.target.closest('li[data-ref]'); if (lr && lr.dataset.ref) abrirObra(obraPorRef(lr.dataset.ref));
       };
     };
     desenhar(); window.scrollTo(0, 0);
