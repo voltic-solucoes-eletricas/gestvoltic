@@ -10,10 +10,11 @@
    v238: «A tratar» igual às bolas do «O que falta fazer» do PC; cada bola abre a lista do que há a fazer (só para ver).
    v239: separador ⏱ Tempos (entradas e saídas minhas e dos colaboradores, com a obra) que vão para o Registo de ponto do PC; reagendar
    todas as marcações; PIN/impressão digital só ao abrir a aplicação depois de fechada; botão 👁 para ocultar os valores; Catálogo nas Ferramentas.
-   v240: agenda como no PC — Mês, Semana, Dia (e Lista), filtros por tipo e responsável; arrastar marcações para outro dia ou hora. */
+   v240: agenda como no PC — Mês, Semana, Dia (e Lista), filtros por tipo e responsável; arrastar marcações para outro dia ou hora.
+   v241: a vista Mês mostra só os dias do mês em questão. */
 (() => {
   'use strict';
-  const VERSAO = '240';
+  const VERSAO = '241';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -1451,7 +1452,7 @@
   const est240 = document.createElement('style');
   est240.textContent = '.agbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}.agbar .ttl{flex:1;text-align:center;font-weight:700;min-width:120px}.agbar select{width:auto;padding:6px;font-size:14px}' +
     '.agm{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}.agm .cab{font-size:11px;font-weight:600;text-align:center;color:var(--suave)}.agm .d{min-height:74px;background:#fff;border:1px solid var(--linha);border-radius:6px;padding:2px;overflow:hidden;cursor:pointer}' +
-    '.agm .d.fora{opacity:.45}.agm .d.fs{background:#eef1f4}.agm .d.fer{background:#efe8f3}.agm .d.hoje{border-color:var(--azul2);border-width:2px}.agm .n{font-size:12px;font-weight:600}.agm .mais{font-size:10px;color:var(--suave)}' +
+    '.agm .d.fora{opacity:.45}.agm .d.vazio{background:transparent;border:0;cursor:default;min-height:0}.agm .d.fs{background:#eef1f4}.agm .d.fer{background:#efe8f3}.agm .d.hoje{border-color:var(--azul2);border-width:2px}.agm .n{font-size:12px;font-weight:600}.agm .mais{font-size:10px;color:var(--suave)}' +
     '.agc{color:#fff;border-radius:5px;padding:2px 4px;margin:2px 0;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}.agc.pend{outline:2px dashed #b86e00;outline-offset:-2px}' +
     '.agw .agc{font-size:13px;padding:6px 8px;white-space:normal}.agw h3{display:flex;justify-content:space-between}.agw.fs{background:#f4f6f8}' +
     '.agg{position:relative;border-left:1px solid var(--linha);margin-left:44px}.agg .hl{position:absolute;left:-44px;right:0;border-top:1px solid #e6ecf0;font-size:11px;color:var(--suave)}.agg .agc{position:absolute;left:4px;right:4px;white-space:normal;font-size:12px}' +
@@ -1475,7 +1476,7 @@
     if (agVista === 'mes') {
       titulo = MESL[+agCur.slice(5, 7) - 1] + ' ' + agCur.slice(0, 4);
       const ini = segD(agCur.slice(0, 8) + '01'); let s = DCURTO.map(n => '<div class="cab">' + n + '</div>').join('');
-      for (let i = 0; i < 42; i++) { const d = somaD(ini, i); if (i === 35 && d.slice(0, 7) !== agCur.slice(0, 7)) break; const es = noDiaA(L, d), wd = new Date(d + 'T12:00:00').getDay();
+      for (let i = 0; i < 42; i++) { const d = somaD(ini, i); if (i === 35 && d.slice(0, 7) !== agCur.slice(0, 7)) break; if (d.slice(0, 7) !== agCur.slice(0, 7)) { s += '<div class="d vazio"></div>'; continue; }   /* v241: só os dias do mês */ const es = noDiaA(L, d), wd = new Date(d + 'T12:00:00').getDay();
         s += '<div class="d' + (d.slice(0, 7) !== agCur.slice(0, 7) ? ' fora' : '') + (wd === 0 || wd === 6 ? ' fs' : '') + (feriado(d) ? ' fer' : '') + (d === hj ? ' hoje' : '') + '" data-dz data-dia="' + d + '" title="' + h(feriado(d)) + '"><div class="n">' + +d.slice(8) + '</div>' + es.slice(0, 3).map(e => chipA(e)).join('') + (es.length > 3 ? '<div class="mais">+' + (es.length - 3) + '</div>' : '') + '</div>'; }
       corpo = '<div class="agm">' + s + '</div><p class="nota">Toque num dia para o abrir. Para mudar de dia, mantenha o dedo numa marcação e arraste-a.</p>';
     } else if (agVista === 'sem') {
