@@ -9,13 +9,16 @@
    separador Fornecedores; «A tratar» com o ecrã inicial do PC (tudo clicável, só para ler); a conta Google lembrada (sem escolher conta).
    v238: «A tratar» igual às bolas do «O que falta fazer» do PC; cada bola abre a lista do que há a fazer (só para ver).
    v239: separador ⏱ Tempos (entradas e saídas minhas e dos colaboradores, com a obra) que vão para o Registo de ponto do PC; reagendar
-   todas as marcações; PIN/impressão digital só ao abrir a aplicação depois de fechada; botão 👁 para ocultar os valores; Catálogo nas Ferramentas. */
+   todas as marcações; PIN/impressão digital só ao abrir a aplicação depois de fechada; botão 👁 para ocultar os valores; Catálogo nas Ferramentas.
+   v240: agenda como no PC — Mês, Semana, Dia (e Lista), filtros por tipo e responsável; arrastar marcações para outro dia ou hora. */
 (() => {
   'use strict';
-  const VERSAO = '239';
+  const VERSAO = '240';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
+  const OLHO = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:middle"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const OLHO_RISCADO = OLHO.replace('</svg>', '<line x1="3" y1="3" x2="21" y2="21"/></svg>');   // v240
   const oc = s => OCULTAR ? String(s ?? '').replace(/\d[\d .]*,\d{2}\s?€/g, '•••••• €') : s;
   const eur = v => OCULTAR ? '•••••• €' : (v == null || v === '' || isNaN(+v)) ? '—' : (+v).toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' });
   const dpt = s => /^\d{4}-\d{2}-\d{2}/.test(String(s || '')) ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : (s || '');
@@ -149,8 +152,8 @@
     $('nav.abas').onclick = e => { const b = e.target.closest('[data-aba]'); if (b) { aba = b.dataset.aba; ecraExtra = null; desenhar(); window.scrollTo(0, 0); } };
     $('#atu').onclick = () => gLigado() ? sincronizar(true, true) : $('#fich').click();   // v236
     $('#fich').onchange = carregarFicheiro;
-    const ol = $('#olho'); ol.textContent = OCULTAR ? '🙈' : '👁';   // v239
-    ol.onclick = () => { OCULTAR = !OCULTAR; try { localStorage.setItem('gv_ocultar', OCULTAR ? '1' : '0'); } catch (_) { } ol.textContent = OCULTAR ? '🙈' : '👁'; desenhar(); };
+    const ol = $('#olho'); ol.innerHTML = OCULTAR ? OLHO_RISCADO : OLHO;   // v239/v240
+    ol.onclick = () => { OCULTAR = !OCULTAR; try { localStorage.setItem('gv_ocultar', OCULTAR ? '1' : '0'); } catch (_) { } ol.innerHTML = OCULTAR ? OLHO_RISCADO : OLHO; desenhar(); };
     desenhar();
     verPartilhas();
     verVersao();   // v207
@@ -512,7 +515,7 @@
   const CORAG = { 'Obra': '#1f7a4d', 'Visita técnica': '#2346d6', 'Reunião': '#7b3fb5', 'Prazo': '#b3261e', 'Outro': '#5f6b76', 'Pedido': '#b86e00' };
   let agPassados = false, agLista = [];   // v236: agLista
   const diaLocal = d => { const p = x => String(x).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); };
-  function vAgenda(m) {
+  function vAgendaLista(m) {   // v240: a lista de antes (vista «Lista»)
     if (!Array.isArray(D.agenda)) {
       m.innerHTML = topo() + '<div class="cartao"><h2>Agenda</h2><p>O ficheiro do PC ainda não traz a agenda. Instale a versão 208 no PC e, depois de o programa gravar o ficheiro (até 15 minutos), carregue em <b>⟳ Atualizar</b>.</p></div>';
       return;
@@ -1417,6 +1420,160 @@
       };
     };
     desenhar(); window.scrollTo(0, 0);
+  }
+
+  /* ---------------------------------------------------------------- v240: agenda Mês / Semana / Dia, como no PC, com arrastar */
+  const lsG = (k, d) => { try { return localStorage.getItem(k) || d; } catch (_) { return d; } };
+  let agVista = lsG('gv_ag_vista', 'sem'), agCur = diaLocal(new Date()), agFT = '', agFR = '', agEv = [], agSupr = 0;
+  const DCURTO = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'], MESL = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const somaD = (s, n) => { const d = new Date(s + 'T12:00:00'); d.setDate(d.getDate() + n); return diaLocal(d); };
+  const segD = s => somaD(s, -((new Date(s + 'T12:00:00').getDay() + 6) % 7));
+  const FER240 = {};
+  function feriado(k) {
+    const y = +k.slice(0, 4); if (!FER240[y]) {
+      const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), hh = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), kk = c % 4, l = (32 + 2 * e + 2 * i - hh - kk) % 7, mm = Math.floor((a + 11 * hh + 22 * l) / 451), mes = Math.floor((hh + l - 7 * mm + 114) / 31), dia = ((hh + l - 7 * mm + 114) % 31) + 1;
+      const P = diaLocal(new Date(y, mes - 1, dia)), o = {};
+      [['01-01', 'Ano Novo'], ['04-25', 'Dia da Liberdade'], ['05-01', 'Dia do Trabalhador'], ['06-10', 'Dia de Portugal'], ['08-15', 'Assunção de N. Senhora'], ['10-05', 'Implantação da República'], ['11-01', 'Todos os Santos'], ['12-01', 'Restauração da Independência'], ['12-08', 'Imaculada Conceição'], ['12-25', 'Natal']].forEach(([md, n]) => { o[y + '-' + md] = n; });
+      o[somaD(P, -2)] = 'Sexta-feira Santa'; o[P] = 'Páscoa'; o[somaD(P, 60)] = 'Corpo de Deus'; FER240[y] = o;
+    }
+    return FER240[y][k] || '';
+  }
+  const podeMover = e => !e.pedido && e.editavel !== false && (!/^w:/.test(String(e.id)) || /^w:\d+:[vi]$/.test(String(e.id)));
+  function agEventos() {
+    const tratado = n => n.guardadaEm && D.geradoEm && new Date(D.geradoEm) > new Date(n.guardadaEm) && !(D.notas || []).some(x => x.origemId === n.id);
+    const pedidos = vivas().filter(n => n.analise && n.analise.tipo === 'agenda' && n.analise.inicio && !tratado(n))
+      .map(n => ({ id: 'p:' + n.id, pedido: true, notaId: n.id, tipo: 'Pedido', titulo: n.assunto || 'Nota', inicio: n.analise.inicio, fim: n.analise.inicio, local: [n.morada, n.localidade].filter(Boolean).join(', ') }));
+    return [...agendaComPendentes(), ...pedidos].filter(e => e.inicio && (!agFT || e.tipo === agFT) && (!agFR || (e.tecnico || '') === agFR)).sort((a, b) => String(a.inicio).localeCompare(String(b.inicio)));
+  }
+  const noDiaA = (L, d) => L.filter(e => String(e.inicio).slice(0, 10) <= d && String(e.fim || e.inicio).slice(0, 10) >= d);
+  const horaA = e => e.diaTodo ? 'Dia inteiro' : String(e.inicio).slice(11, 16);
+  const chipA = (e, est) => '<div class="agc' + (podeMover(e) ? ' mv' : '') + (e.pendente ? ' pend' : '') + '" data-ev="' + h(e.id) + '" style="background:' + (CORAG[e.tipo] || CORAG.Outro) + ';' + (est || '') + '">' + (e.diaTodo ? '' : '<b>' + h(String(e.inicio).slice(11, 16)) + '</b> ') + h(e.titulo) + (e.pronta ? ' ✔' : '') + '</div>';
+  const est240 = document.createElement('style');
+  est240.textContent = '.agbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 8px}.agbar .ttl{flex:1;text-align:center;font-weight:700;min-width:120px}.agbar select{width:auto;padding:6px;font-size:14px}' +
+    '.agm{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}.agm .cab{font-size:11px;font-weight:600;text-align:center;color:var(--suave)}.agm .d{min-height:74px;background:#fff;border:1px solid var(--linha);border-radius:6px;padding:2px;overflow:hidden;cursor:pointer}' +
+    '.agm .d.fora{opacity:.45}.agm .d.fs{background:#eef1f4}.agm .d.fer{background:#efe8f3}.agm .d.hoje{border-color:var(--azul2);border-width:2px}.agm .n{font-size:12px;font-weight:600}.agm .mais{font-size:10px;color:var(--suave)}' +
+    '.agc{color:#fff;border-radius:5px;padding:2px 4px;margin:2px 0;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}.agc.pend{outline:2px dashed #b86e00;outline-offset:-2px}' +
+    '.agw .agc{font-size:13px;padding:6px 8px;white-space:normal}.agw h3{display:flex;justify-content:space-between}.agw.fs{background:#f4f6f8}' +
+    '.agg{position:relative;border-left:1px solid var(--linha);margin-left:44px}.agg .hl{position:absolute;left:-44px;right:0;border-top:1px solid #e6ecf0;font-size:11px;color:var(--suave)}.agg .agc{position:absolute;left:4px;right:4px;white-space:normal;font-size:12px}' +
+    '.agsobre{outline:3px solid var(--azul2)!important;outline-offset:-3px}.agc.agarr{opacity:.35}.agf{position:fixed;z-index:50;pointer-events:none;width:160px;box-shadow:0 6px 16px #0006;opacity:.95}';
+  document.head.append(est240);
+  function barraAg(titulo) {
+    const tipos = [...new Set([...TIPOSAG, ...(D.agenda || []).map(e => e.tipo).filter(Boolean)])], resps = [...new Set((D.agenda || []).map(e => e.tecnico).filter(Boolean))];
+    return '<div class="filtros">' + [['mes', 'Mês'], ['sem', 'Semana'], ['dia', 'Dia'], ['lista', 'Lista']].map(([k, n]) => '<button data-agv="' + k + '" class="' + (agVista === k ? 'on' : '') + '">' + n + '</button>').join('') + '</div>' +
+      (agVista !== 'lista' ? '<div class="agbar"><button class="btn sec peq" data-agn2="-1">‹</button><button class="btn sec peq" data-agh>Hoje</button><span class="ttl">' + h(titulo) + '</span><button class="btn sec peq" data-agn2="1">›</button></div>' : '') +
+      '<div class="agbar"><select id="agft"><option value="">Todos os tipos</option>' + tipos.map(x => '<option' + (x === agFT ? ' selected' : '') + '>' + h(x) + '</option>').join('') + '</select>' +
+      (resps.length ? '<select id="agfr"><option value="">Todos os responsáveis</option>' + resps.map(x => '<option' + (x === agFR ? ' selected' : '') + '>' + h(x) + '</option>').join('') + '</select>' : '') + '<button class="btn peq" data-agn>+ Nova</button></div>';
+  }
+  function vAgenda(m) {
+    if (!Array.isArray(D.agenda)) return vAgendaLista(m);
+    if (agVista === 'lista') {
+      vAgendaLista(m); const tp = m.querySelector('p.nota'); const bar = document.createElement('div'); bar.innerHTML = barraAg(''); (tp || m.firstChild) ? m.insertBefore(bar, tp ? tp.nextSibling : m.firstChild) : m.prepend(bar);
+      const antes = m.onclick; m.onclick = e => { if (barraCliques(e, m)) return; antes && antes(e); }; ligaFiltros(m); return;
+    }
+    agEv = agEventos(); const L = agEv, hj = diaLocal(new Date());
+    let titulo = '', corpo = '';
+    if (agVista === 'mes') {
+      titulo = MESL[+agCur.slice(5, 7) - 1] + ' ' + agCur.slice(0, 4);
+      const ini = segD(agCur.slice(0, 8) + '01'); let s = DCURTO.map(n => '<div class="cab">' + n + '</div>').join('');
+      for (let i = 0; i < 42; i++) { const d = somaD(ini, i); if (i === 35 && d.slice(0, 7) !== agCur.slice(0, 7)) break; const es = noDiaA(L, d), wd = new Date(d + 'T12:00:00').getDay();
+        s += '<div class="d' + (d.slice(0, 7) !== agCur.slice(0, 7) ? ' fora' : '') + (wd === 0 || wd === 6 ? ' fs' : '') + (feriado(d) ? ' fer' : '') + (d === hj ? ' hoje' : '') + '" data-dz data-dia="' + d + '" title="' + h(feriado(d)) + '"><div class="n">' + +d.slice(8) + '</div>' + es.slice(0, 3).map(e => chipA(e)).join('') + (es.length > 3 ? '<div class="mais">+' + (es.length - 3) + '</div>' : '') + '</div>'; }
+      corpo = '<div class="agm">' + s + '</div><p class="nota">Toque num dia para o abrir. Para mudar de dia, mantenha o dedo numa marcação e arraste-a.</p>';
+    } else if (agVista === 'sem') {
+      const s0 = segD(agCur); titulo = dpt(s0).slice(0, 5) + ' – ' + dpt(somaD(s0, 6));
+      corpo = Array.from({ length: 7 }, (_, i) => { const d = somaD(s0, i), es = noDiaA(L, d), wd = new Date(d + 'T12:00:00').getDay();
+        return '<div class="cartao agw' + (wd === 0 || wd === 6 || feriado(d) ? ' fs' : '') + '" data-dz data-dia="' + d + '"><h3><span>' + (d === hj ? 'Hoje · ' : '') + DCURTO[i] + ' ' + dpt(d).slice(0, 5) + (feriado(d) ? ' · ' + h(feriado(d)) : '') + '</span><button class="btn sec peq" data-agd="' + d + '">Dia ›</button></h3>' + (es.length ? es.map(e => chipA(e)).join('') : '<p class="nota" style="margin:0">—</p>') + '</div>'; }).join('') +
+        '<p class="nota">Mantenha o dedo numa marcação e arraste-a para outro dia.</p>';
+    } else {
+      titulo = (agCur === hj ? 'Hoje · ' : '') + new Date(agCur + 'T12:00:00').toLocaleDateString('pt-PT', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }) + (feriado(agCur) ? ' · ' + feriado(agCur) : '');
+      const es = noDiaA(L, agCur), todo = es.filter(e => e.diaTodo || String(e.inicio).slice(0, 10) !== String(e.fim || e.inicio).slice(0, 10)), hrs = es.filter(e => !todo.includes(e)), HI = 7, HF = 22, PXH = 48;
+      const mins = s => +String(s).slice(11, 13) * 60 + +String(s).slice(14, 16);
+      const fins = [], col = hrs.map(e => { let i = fins.findIndex(f => f <= e.inicio); if (i < 0) { i = fins.length; fins.push(''); } fins[i] = e.fim || e.inicio; return i; }), nc = Math.max(1, fins.length);
+      corpo = (todo.length ? '<div class="cartao" data-dz data-dia="' + agCur + '">' + todo.map(e => chipA(e)).join('') + '</div>' : '') +
+        '<div class="cartao" style="padding:8px 6px"><div class="agg" data-grade="' + agCur + '" style="height:' + (HF - HI) * PXH + 'px">' + Array.from({ length: HF - HI }, (_, i) => '<div class="hl" style="top:' + i * PXH + 'px">' + (HI + i) + ':00</div>').join('') +
+        hrs.map((e, k) => { const a = Math.max(mins(e.inicio), HI * 60), b = Math.max(a + 20, Math.min(mins(e.fim || e.inicio), HF * 60)); return chipA(e, 'top:' + (a - HI * 60) / 60 * PXH + 'px;height:' + ((b - a) / 60 * PXH - 2) + 'px;left:calc(' + (col[k] / nc * 100) + '% + 4px);width:calc(' + (100 / nc) + '% - 8px);right:auto'); }).join('') + '</div></div>' +
+        '<p class="nota">Toque numa hora livre para marcar a essa hora. Mantenha o dedo numa marcação e arraste-a para outra hora.</p>';
+    }
+    m.innerHTML = topo() + barraAg(titulo) + corpo + '<p class="nota">Agenda do PC. O que muda aqui passa sozinho para o PC' + (gLigado() ? '.' : ' depois de ligar ao Google Drive (Ferramentas › Entrada e versão).') + '</p>';
+    ligaFiltros(m); ligaArrastar(m);
+    m.onclick = e => {
+      if (barraCliques(e, m)) return;
+      if (Date.now() - agSupr < 600) return;
+      const c = e.target.closest('.agc[data-ev]'); if (c) { const x = agEv.find(y => String(y.id) === c.dataset.ev); if (x) abrirEventoA(x); return; }
+      const bd = e.target.closest('[data-agd]'); if (bd) { agCur = bd.dataset.agd; agVista = 'dia'; return vAgenda(m); }
+      const g = e.target.closest('[data-grade]'); if (g) { const y = e.clientY - g.getBoundingClientRect().top, mi = Math.max(7 * 60, Math.min(21 * 60, Math.floor((7 * 60 + y / 48 * 60) / 30) * 30)); return novaA(g.dataset.grade, String(Math.floor(mi / 60)).padStart(2, '0') + ':' + String(mi % 60).padStart(2, '0')); }
+      const dz = e.target.closest('.agm [data-dia]'); if (dz) { agCur = dz.dataset.dia; agVista = 'dia'; return vAgenda(m); }
+    };
+  }
+  function barraCliques(e, m) {
+    const v = e.target.closest('[data-agv]'); if (v) { agVista = v.dataset.agv; try { localStorage.setItem('gv_ag_vista', agVista); } catch (_) { } vAgenda(m); return true; }
+    const n2 = e.target.closest('[data-agn2]'); if (n2) { const k = +n2.dataset.agn2; if (agVista === 'mes') { const d = new Date(agCur.slice(0, 8) + '01T12:00:00'); d.setMonth(d.getMonth() + k); agCur = diaLocal(d); } else agCur = somaD(agCur, k * (agVista === 'sem' ? 7 : 1)); vAgenda(m); return true; }
+    if (e.target.closest('[data-agh]')) { agCur = diaLocal(new Date()); vAgenda(m); return true; }
+    if (e.target.closest('[data-agn]')) { novaA(agVista === 'dia' ? agCur : '', ''); return true; }
+    return false;
+  }
+  function ligaFiltros(m) {
+    const ft = m.querySelector('#agft'), fr = m.querySelector('#agfr');
+    if (ft) ft.onchange = () => { agFT = ft.value; vAgenda(m); };
+    if (fr) fr.onchange = () => { agFR = fr.value; vAgenda(m); };
+  }
+  function novaA(dia, hora) {
+    formAgenda(null);
+    if (dia && $('#agd')) $('#agd').value = dia;
+    if (hora && $('#aghi')) { $('#aghi').value = hora; const [hh, mm] = hora.split(':').map(Number); if ($('#aghf')) $('#aghf').value = String(Math.min(23, hh + 1)).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); }
+  }
+  function abrirEventoA(e) {
+    const ant = aba;
+    ecraExtra = m => {
+      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><div style="display:flex;gap:8px;align-items:center"><span class="ag-c" style="background:' + (CORAG[e.tipo] || CORAG.Outro) + ';width:14px;height:14px;border-radius:7px;display:inline-block"></span><h2 style="margin:0">' + h(e.titulo) + '</h2></div>' +
+        '<dl class="det"><dt>Quando</dt><dd>' + h(dpt(String(e.inicio).slice(0, 10))) + ' · ' + h(horaA(e)) + (!e.diaTodo && e.fim && String(e.fim).slice(0, 10) === String(e.inicio).slice(0, 10) ? '–' + h(String(e.fim).slice(11, 16)) : '') + '</dd>' +
+        '<dt>Tipo</dt><dd>' + h(e.tipo || '—') + (e.pendente ? ' <span class="chip am">por passar ao PC</span>' : '') + (e.pronta ? ' <span class="chip ok">✔ Pronta</span>' : '') + '</dd>' +
+        (e.cliente || e.fornecedor || e.tecnico ? '<dt>Com</dt><dd>' + h([e.cliente, e.fornecedor, e.tecnico].filter(Boolean).join(' · ')) + '</dd>' : '') +
+        (e.local ? '<dt>Local</dt><dd>' + mapa(e.local) + '</dd>' : '') + (e.notas ? '<dt>Notas</dt><dd style="white-space:pre-wrap">' + h(e.notas) + '</dd>' : '') + '</dl>' +
+        botoesAg(e) + (e.ref && obraPorRef(e.ref) ? '<p class="linha" style="margin-top:8px"><button class="btn sec peq" data-agobra>Ver a proposta ' + h(e.ref) + '</button></p>' : '') + '</div>';
+      m.onclick = async ev => {
+        if (ev.target.closest('.voltar')) { ecraExtra = null; aba = ant; return desenhar(); }
+        if (ev.target.closest('a')) return;
+        if (ev.target.closest('[data-agobra]')) { ecraExtra = null; return abrirObra(obraPorRef(e.ref)); }
+        if (ev.target.closest('[data-agp]')) { if (confirm('Marcar a visita «' + e.titulo + '» como pronta?')) { await acaoAgenda('pronta', { id: e.id, titulo: e.titulo }); ecraExtra = null; aba = 'agenda'; desenhar(); } return; }
+        if (ev.target.closest('[data-age]')) { ecraExtra = null; return formAgenda(e); }
+        if (ev.target.closest('[data-agr]')) { ecraExtra = null; return formReagendar(e); }
+      };
+    };
+    desenhar(); window.scrollTo(0, 0);
+  }
+  function ligaArrastar(m) {
+    let zonaAtual = null;
+    const marca = z => { if (zonaAtual === z) return; if (zonaAtual) zonaAtual.classList.remove('agsobre'); zonaAtual = z; if (z) z.classList.add('agsobre'); };
+    const zonaEm = (x, y) => { const el = document.elementFromPoint(x, y); return el ? (el.closest('[data-grade]') || el.closest('[data-dz]')) : null; };
+    m.querySelectorAll('.agc.mv[data-ev]').forEach(el => {
+      let t = null, ativo = false, fant = null, x0 = 0, y0 = 0, dy = 0;
+      const comeca = (x, y) => { ativo = true; el.classList.add('agarr'); dy = y - el.getBoundingClientRect().top; fant = el.cloneNode(true); fant.classList.add('agf'); fant.classList.remove('agarr'); document.body.append(fant); mexe(x, y); try { navigator.vibrate && navigator.vibrate(25); } catch (_) { } };
+      const mexe = (x, y) => { if (!fant) return; fant.style.left = Math.max(4, x - 60) + 'px'; fant.style.top = (y - 14) + 'px'; marca(zonaEm(x, y)); };
+      const acaba = (x, y) => { clearTimeout(t); if (!ativo) return; ativo = false; agSupr = Date.now(); el.classList.remove('agarr'); if (fant) fant.remove(); fant = null; const z = zonaEm(x, y); marca(null); if (z) largarA(el.dataset.ev, z, y, dy, m); };
+      el.addEventListener('touchstart', ev => { const p = ev.touches[0]; x0 = p.clientX; y0 = p.clientY; clearTimeout(t); t = setTimeout(() => comeca(x0, y0), 450); }, { passive: true });
+      el.addEventListener('touchmove', ev => { const p = ev.touches[0]; if (!ativo) { if (Math.hypot(p.clientX - x0, p.clientY - y0) > 8) clearTimeout(t); return; } ev.preventDefault(); x0 = p.clientX; y0 = p.clientY; mexe(x0, y0); }, { passive: false });
+      el.addEventListener('touchend', ev => { const p = ev.changedTouches[0]; if (ativo) ev.preventDefault(); acaba(p.clientX, p.clientY); });
+      el.addEventListener('touchcancel', () => { clearTimeout(t); if (ativo) { ativo = false; el.classList.remove('agarr'); if (fant) fant.remove(); fant = null; marca(null); } });
+      el.addEventListener('contextmenu', ev => ev.preventDefault());
+      el.addEventListener('mousedown', ev => {
+        if (ev.button !== 0) return; const mx = ev.clientX, my = ev.clientY;
+        const mv = e2 => { if (!ativo && Math.hypot(e2.clientX - mx, e2.clientY - my) > 6) comeca(e2.clientX, e2.clientY); else if (ativo) mexe(e2.clientX, e2.clientY); };
+        const up = e2 => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); acaba(e2.clientX, e2.clientY); };
+        document.addEventListener('mousemove', mv); document.addEventListener('mouseup', up);
+      });
+    });
+  }
+  async function largarA(id, z, y, dy, m) {
+    const e = agEv.find(x => String(x.id) === String(id)); if (!e) return;
+    let d = z.dataset.grade || z.dataset.dia, hhmm = String(e.inicio).slice(11, 16);
+    if (z.dataset.grade && !e.diaTodo) { const mi = Math.max(0, Math.min(23 * 60 + 45, Math.round((7 * 60 + (y - dy - z.getBoundingClientRect().top) / 48 * 60) / 15) * 15)); hhmm = String(Math.floor(mi / 60)).padStart(2, '0') + ':' + String(mi % 60).padStart(2, '0'); }
+    const ini = d + 'T' + hhmm; if (ini === e.inicio) return;
+    const dur = Math.max(15 * 60000, new Date(e.fim || e.inicio) - new Date(e.inicio)), f = new Date(new Date(ini).getTime() + dur);
+    const fim = e.diaTodo ? d + 'T' + String(e.fim || e.inicio).slice(11, 16) : diaLocal(f) + 'T' + String(f.getHours()).padStart(2, '0') + ':' + String(f.getMinutes()).padStart(2, '0');
+    if (!confirm('Passar «' + e.titulo + '»\nde ' + dpt(String(e.inicio).slice(0, 10)) + ' ' + horaA(e) + '\npara ' + dpt(d) + (e.diaTodo ? ' (dia inteiro)' : ' ' + hhmm) + '?')) return;
+    const { pendente, pronta, editavel, ...base } = e;
+    await acaoAgenda('alterar', Object.assign({}, base, { inicio: ini, fim, diaTodo: !!e.diaTodo }));
+    aviso(gLigado() ? 'Reagendada — vai para o PC' : 'Reagendada'); vAgenda(m);
   }
 
   inicio();
