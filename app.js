@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '242';
+  const VERSAO = '243';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -973,7 +973,7 @@
     for (const a of vivas().filter(n => n.tipoNota === 'agenda' && n.criada >= lim).sort((x, y) => x.criada.localeCompare(y.criada))) {
       const i = L.findIndex(e => String(e.id) === String(a.eventoId));
       if (a.acao === 'criar' && i < 0) L.push(Object.assign({}, a.evento, { pendente: true, editavel: true }));
-      else if (a.acao === 'alterar' && i >= 0 && !a.guardadaEm) L[i] = Object.assign({}, L[i], a.evento, { pendente: true });
+      else if (a.acao === 'alterar' && i >= 0 && (!a.guardadaEm || !(D.geradoEm && new Date(D.geradoEm) > new Date(a.guardadaEm)))) L[i] = Object.assign({}, L[i], a.evento, { pendente: true });   // v243: até o PC a tratar
       else if (a.acao === 'apagar' && i >= 0) L.splice(i, 1);
       else if (a.acao === 'pronta' && i >= 0 && !L[i].pronta) L[i] = Object.assign({}, L[i], { pronta: true, pendente: true });
     }
