@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '243';
+  const VERSAO = '244';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -1029,7 +1029,7 @@
   const COMUNS = [['origin', 'Origem da instalação', [['', '—'], ['garagem', 'Quadro dos serviços comuns da garagem'], ['arrumos', 'Quadro dos arrumos da fração'], ['habitacao', 'Quadro da habitação']]], ['parking', 'Lugar de estacionamento'], ['applicant', 'Requerente']];
   const CAMPOS = {
     inst: [['regime', 'Regime', [['', '—'], ...lst('Monofásico', 'Trifásico')]], ['power', 'Potência', POT], ['breakerIn', '[In] disjuntor', [['', '—'], ...lst('16 A', '20 A', '25 A', '32 A', '40 A')]], ['rcdIn', '[In] diferencial', [['', '—'], ...lst('24 A', '40 A', '63 A')]],
-      ['rcdClass', 'Classe de proteção', [['', '—'], ...lst('Tipo A', 'Tipo B')]], ['tube', 'Cabo em tubo VD HL com abraçadeiras', SN], ['tray', 'Cabo em caminho de esteira', SN], ['cableM', 'Comprimento do cabo (m)'],
+      ['rcdClass', 'Classe de proteção', [['', '—'], ...lst('Tipo A', 'Tipo B')]], ['localBoard', 'Quadro de corte local instalado', SN], ['tube', 'Cabo em tubo VD HL com abraçadeiras', SN], ['tray', 'Cabo em caminho de esteira', SN], ['cableM', 'Comprimento do cabo (m)'],
       ['cableType', 'Tipo de cabo', [['', '—'], ...lst('3G4 RZ1K', '3G6 RZ1K', '3G10 RZ1K', '3G16 RZ1K', '5G4 RZ1K', '5G6 RZ1K', '5G10 RZ1K')]], ['test', 'Teste com o carregador do veículo', SN]],
     viab: [['equipModel', 'Modelo/Marca do equipamento', [['', '—'], ...lst('Carregador de parede em AC', 'Tomada')]], ['power', 'Potência nominal', POT]]
   };
