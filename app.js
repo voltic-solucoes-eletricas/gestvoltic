@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '244';
+  const VERSAO = '245';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -139,7 +139,7 @@
     if (document.hidden) { escondidoEm = Date.now(); if (detetor && detetor.screenState === 'locked') ecraBloqueou = true; return; }
     if (emCamara) { emCamara = false; return; }   // v164: voltar da câmara ou da galeria não bloqueia
     if (detetor) await new Promise(r => setTimeout(r, 400));   // deixa chegar o aviso de «ecrã bloqueado» que ficou em espera
-    const bloquear = false;   // v239 (pedido do Jorge): o PIN/impressão digital só é pedido ao abrir a aplicação depois de fechada
+    const bloquear = ecraBloqueou || (!detetor && escondidoEm && Date.now() - escondidoEm > 120000);   // v245 (pedido do Jorge): o PIN volta a ser pedido depois de o ecrã do telemóvel se desligar (sem o detetor: 2 min fora)
     ecraBloqueou = false;
     if (bloquear) { CHAVE = null; D = null; N = []; pedirPin(await ler('meta')); }
     else if (CHAVE) verVersao();   // v207
