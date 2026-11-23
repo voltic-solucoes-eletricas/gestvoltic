@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '341';
+  const VERSAO = '342';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -73,6 +73,8 @@
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
     const meta = await ler('meta');
     if (!meta) return criarPin();
+    let s = null; try { s = await ler('sessaoV342'); } catch (_) { }   // v342: o Android fechou a app há pouco e o ecrã não apagou → entra sem PIN
+    if (s && s.k && Date.now() - s.ativo < 1800000) { try { CHAVE = s.k; const t = await decifrar(meta.teste); if (t.ok === 'gestvoltic') return pedirPin(meta, true); } catch (_) { } CHAVE = null; }
     pedirPin(meta);
   }
   function criarPin() {
@@ -93,7 +95,7 @@
       /* v239: sem deteção do ecrã */   // v235
     };
   }
-  function pedirPin(meta) {
+  function pedirPin(meta, auto) {
     raiz().innerHTML = '<div class="centro cartao"><h2>GestVoltic</h2><p>PIN</p><input id="pin" type="password" inputmode="numeric" autocomplete="current-password" autofocus>' +
       '<p class="erro" id="er"></p><button class="btn" id="ok">Entrar</button>' + (meta.bio ? '<p></p><button class="btn sec" id="bio">👆 Entrar com impressão digital</button>' : '') + '<p class="nota">Versão ' + h(VERSAO) + '</p></div>';
     const entra = async pin => { CHAVE = await derivar(pin, meta.sal); const t = await decifrar(meta.teste); if (t.ok !== 'gestvoltic') throw new Error(); };
@@ -102,7 +104,8 @@
       try { const x = await ler('notas'); N = x ? await decifrar(x) : []; } catch (_) { N = []; }
       try { const x = await ler('tecnico'); TEC = x ? await decifrar(x) : ''; } catch (_) { TEC = ''; }
       principal();
-      /* v239: sem deteção do ecrã */   // v235: a primeira vez pede a autorização (logo a seguir ao PIN, que conta como toque)
+      gravar('sessaoV342', { k: CHAVE, ativo: Date.now() }).catch(() => { });   // v342
+      ligaDetetor(auto ? false : !detetorPedido()).catch(() => { });   // v342: pede UMA vez a autorização do ecrã (o PIN conta como toque)
       sincronizar(true);   // v236
     };
     const vai = async () => {
@@ -113,6 +116,7 @@
       }
       await abre();
     };
+    if (auto) { abre(); return; }   // v342
     $('#ok').onclick = vai;
     $('#pin').onkeydown = e => { if (e.key === 'Enter') vai(); };
     if (meta.bio) $('#bio').onclick = async () => {   /* v207 */
@@ -131,27 +135,27 @@
       if (pedir) { try { localStorage.setItem('gv_detetor_pedido', '1'); } catch (_) { } if (await IdleDetector.requestPermission() !== 'granted') return false; }
       else { const st = await navigator.permissions.query({ name: 'idle-detection' }); if (st.state !== 'granted') return false; }
       const d = new IdleDetector();
-      d.addEventListener('change', () => { if (d.screenState === 'locked') ecraBloqueou = true; });
+      d.addEventListener('change', () => { if (d.screenState === 'locked') { ecraBloqueou = true; gravar('sessaoV342', null).catch(() => { }); } });
       await d.start({ threshold: 60000 }); detetor = d; return true;
     } catch (_) { return false; }
   }
   document.addEventListener('visibilitychange', async () => {
-    if (document.hidden) { escondidoEm = Date.now(); if (detetor && detetor.screenState === 'locked') ecraBloqueou = true; return; }
+    if (document.hidden) { escondidoEm = Date.now(); if (CHAVE) gravar('sessaoV342', { k: CHAVE, ativo: Date.now() }).catch(() => { }); if (detetor && detetor.screenState === 'locked') { ecraBloqueou = true; gravar('sessaoV342', null).catch(() => { }); } return; }
     if (emCamara) { emCamara = false; return; }   // v164: voltar da câmara ou da galeria não bloqueia
     if (detetor) await new Promise(r => setTimeout(r, 400));   // deixa chegar o aviso de «ecrã bloqueado» que ficou em espera
-    const bloquear = ecraBloqueou || (!detetor && escondidoEm && Date.now() - escondidoEm > 120000);   // v245 (pedido do Jorge): o PIN volta a ser pedido depois de o ecrã do telemóvel se desligar (sem o detetor: 2 min fora)
+    const bloquear = ecraBloqueou || (!detetor && escondidoEm && Date.now() - escondidoEm > 1800000);   // v342: sem o detetor, 30 min fora   // v245 (pedido do Jorge): o PIN volta a ser pedido depois de o ecrã do telemóvel se desligar (sem o detetor: 2 min fora)
     ecraBloqueou = false;
-    if (bloquear) { CHAVE = null; D = null; N = []; pedirPin(await ler('meta')); }
+    if (bloquear) { gravar('sessaoV342', null).catch(() => { }); CHAVE = null; D = null; N = []; pedirPin(await ler('meta')); }
     else if (CHAVE) verVersao();   // v207
   });
 
   /* ---------------------------------------------------------------- estrutura */
-  const ABAS = [['avisos', '🔔', 'A tratar'], ['agenda', '📅', 'Agenda'], ['propostas', '📄', 'Propostas'], ['clientes', '👥', 'Clientes'], ['fornecedores', '🏭', 'Fornec.'], ['tempos', '⏱', 'Tempos'], ['ferramentas', '🧮', 'Ferram.'], ['notas', '✏️', 'Notas']];   // v237: nomes curtos para caberem 8
+  const ABAS = [['avisos', '🔔', 'A tratar'], ['agenda', '📅', 'Agenda'], ['propostas', '📄', 'Propostas'], ['clientes', '👥', 'Contactos'], ['stock', '📦', 'Stock'], ['tempos', '⏱', 'Tempos'], ['ferramentas', '🧮', 'Ferram.'], ['notas', '✏️', 'Notas']];   // v237: nomes curtos para caberem 8
   function principal() {
     raiz().innerHTML = '<header><h1 id="tit">GestVoltic</h1><button id="olho" title="Mostrar ou ocultar os valores" aria-label="Mostrar ou ocultar os valores">👁</button><button id="atu">⟳ Atualizar</button></header><main id="m"></main>' +
       '<nav class="abas">' + ABAS.map(([k, i, t]) => '<button data-aba="' + k + '"><b>' + i + '</b>' + t + '</button>').join('') + '</nav>' +
       '<input type="file" id="fich" accept=".json,application/json" hidden>';
-    $('nav.abas').onclick = e => { const b = e.target.closest('[data-aba]'); if (b) { aba = b.dataset.aba; ecraExtra = null; desenhar(); window.scrollTo(0, 0); } };
+    $('nav.abas').onclick = e => { const b = e.target.closest('[data-aba]'); if (b) { aba = b.dataset.aba === 'clientes' && procura.cont ? procura.cont : b.dataset.aba; ecraExtra = null; desenhar(); window.scrollTo(0, 0); } };
     $('#atu').onclick = () => gLigado() ? sincronizar(true, true) : $('#fich').click();   // v236
     $('#fich').onchange = carregarFicheiro;
     const ol = $('#olho'); ol.innerHTML = OCULTAR ? OLHO_RISCADO : OLHO;   // v239/v240
@@ -172,7 +176,7 @@
     } catch (err) { alert('Não foi possível ler o ficheiro: ' + err.message); }
   }
   function desenhar() {
-    document.querySelectorAll('nav.abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba));
+    document.querySelectorAll('nav.abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba || (b.dataset.aba === 'clientes' && aba === 'fornecedores')));
     const m = $('#m'); if (!m) return;
     $('#tit').textContent = (D?.empresa || 'GestVoltic');
     if (ecraExtra) return ecraExtra(m);
@@ -181,10 +185,10 @@
         '<p class="nota">O programa do PC atualiza esse ficheiro sozinho de 15 em 15 minutos. Se o OneDrive pedir, escolha «Manter sempre neste dispositivo».</p></div>';
       return;
     }
-    ({ avisos: vTratar, agenda: vAgenda, propostas: vPropostas, clientes: vClientes, fornecedores: vFornecedores, tempos: vTempos, catalogo: vCatalogo, ferramentas: vFerramentas, notas: vNotas })[aba](m);   // v237
+    ({ avisos: vTratar, agenda: vAgenda, propostas: vPropostas, clientes: vClientes, fornecedores: vFornecedores, stock: vStock, tempos: vTempos, catalogo: vCatalogo, ferramentas: vFerramentas, notas: vNotas })[aba](m);   // v237
   }
   const velho = () => D && D.geradoEm && (Date.now() - new Date(D.geradoEm).getTime() > 2 * 86400000);
-  const COD237 = { avisos: 'M001 · A tratar', agenda: 'M002 · Agenda', propostas: 'M003 · Propostas', clientes: 'M004 · Clientes', fornecedores: 'M005 · Fornecedores', catalogo: 'M006 · Catálogo', ferramentas: 'M007 · Ferramentas', notas: 'M008 · Notas', tempos: 'M009 · Tempos' };   // v237: códigos dos ecrãs (índice H900 do PC)
+  const COD237 = { avisos: 'M001 · A tratar', agenda: 'M002 · Agenda', propostas: 'M003 · Propostas', clientes: 'M004 · Clientes', fornecedores: 'M005 · Fornecedores', catalogo: 'M006 · Catálogo', ferramentas: 'M007 · Ferramentas', notas: 'M008 · Notas', tempos: 'M009 · Tempos', stock: 'M010 · Stock' };   // v237: códigos dos ecrãs (índice H900 do PC)
   const topo = () => D ? '<p class="nota"><b>' + h(COD237[aba] || '') + '</b> · Dados do PC de ' + h(quando(D.geradoEm)) + (velho() ? ' — <b style="color:#b3261e">têm mais de 2 dias: carregue em ⟳ Atualizar</b>' : '') + '</p>' : '';
 
   /* ---------------------------------------------------------------- avisos */
@@ -279,7 +283,7 @@
     const q = sem(procura.c);
     let cs = (D.clientes || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt'));
     if (q) cs = cs.filter(c => sem([c.name, c.nif, c.phone, c.email, c.address, c.town].join(' ')).includes(q));
-    m.innerHTML = topo() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone…" value="' + h(procura.c) + '"><p class="nota">' + cs.length + ' cliente(s)</p><ul class="lista">' +
+    m.innerHTML = topo() + CONT342() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone…" value="' + h(procura.c) + '"><p class="nota">' + cs.length + ' cliente(s)</p><ul class="lista">' +
       cs.slice(0, 200).map(c => '<li class="toque" data-id="' + c.id + '"><div class="t">' + h(c.name) + '</div><div class="s">' + h([c.phone, c.town].filter(Boolean).join(' · ')) + '</div></li>').join('') + '</ul>';
     const q2 = $('#q'); q2.oninput = () => { procura.c = q2.value; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vClientes(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
     m.onclick = e => { const li = e.target.closest('li[data-id]'); if (li) abrirCliente(cliente(li.dataset.id)); };
@@ -718,7 +722,7 @@
         if (e.target.closest('[data-glig]')) { try { await gToken(true); gPastas = null; await sincronizar(true, true); } catch (err) { er.textContent = 'Não foi possível ligar ao Google Drive: ' + err.message; } return cartaoSeg(el); }   // v236
         if (e.target.closest('[data-gsinc]')) { await sincronizar(true, true); return cartaoSeg(el); }
         if (e.target.closest('[data-gdes]')) { if (!confirm('Desligar do Google Drive? As anotações voltam a ser guardadas à mão.')) return; try { localStorage.removeItem('gv_google'); } catch (_) { } try { if (gTok && window.google) google.accounts.oauth2.revoke(gTok, () => { }); } catch (_) { } gTok = ''; gPastas = null; gEstado = ''; return cartaoSeg(el); }
-        if (e.target.closest('[data-detetor]')) { const ok = await ligaDetetor(true); if (ok) return cartaoSeg(el); er.textContent = 'Sem autorização: o telemóvel recusou (pode autorizar em Definições do Chrome › Definições de sites › Deteção de inatividade). Continua a regra dos 5 minutos.'; return; }
+        if (e.target.closest('[data-detetor]')) { const ok = await ligaDetetor(true); if (ok) return cartaoSeg(el); er.textContent = 'Sem autorização: o telemóvel recusou (pode autorizar em Definições do Chrome › Definições de sites › Deteção de inatividade). Continua a regra dos 30 minutos.'; return; }
         if (e.target.closest('[data-recarregar]')) return location.reload();
         if (e.target.closest('[data-procurar]')) { er.textContent = 'A procurar…'; await verVersao(); if (novaVersao) return cartaoSeg(el); er.textContent = 'Já tem a versão mais recente (ou está sem rede).'; return; }
         if (e.target.closest('[data-biodes]')) { if (!confirm('Desativar a entrada com impressão digital? Passa a entrar só com o PIN.')) return; const mt = await ler('meta'); delete mt.bio; await gravar('meta', mt); return cartaoSeg(el); }
@@ -1194,22 +1198,24 @@
   }
   /* ---------- Fornecedores ---------- */
   function vFornecedores(m) {
-    if (procura.modo === 'stock') return vStock(m);   // v341
     const L0 = D.fornecedores;
     if (!Array.isArray(L0)) { m.innerHTML = topo() + '<div class="cartao"><h2>Fornecedores</h2><p>O ficheiro do PC ainda não traz os fornecedores: instale no PC a versão 299 e carregue em ⟳ Atualizar.</p></div>'; return; }
     const q = sem(procura.f);
     let fs = L0.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt'));
     if (q) fs = fs.filter(f => sem([f.name, f.nif, f.phone, f.email, f.address, f.town, ...(f.pessoas || []).map(p => p.nome + ' ' + p.tel + ' ' + p.email)].join(' ')).includes(q));
-    m.innerHTML = topo() + MODOS341() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone, pessoa…" value="' + h(procura.f) + '"><p class="nota">' + fs.length + ' fornecedor(es)</p><ul class="lista">' +
+    m.innerHTML = topo() + CONT342() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone, pessoa…" value="' + h(procura.f) + '"><p class="nota">' + fs.length + ' fornecedor(es)</p><ul class="lista">' +
       fs.slice(0, 200).map(f => '<li class="toque" data-id="' + h(f.id) + '"><div class="t">' + h(f.name) + '</div><div class="s">' + h([f.phone, f.town, (f.pessoas || []).map(p => p.nome).filter(Boolean).join(', ')].filter(Boolean).join(' · ')) + '</div></li>').join('') + '</ul>' +
       (fs.length > 200 ? '<p class="nota">Mostra os primeiros 200: use a procura.</p>' : '');
     const q2 = $('#q'); q2.oninput = () => { procura.f = q2.value; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vFornecedores(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
     m.onclick = e => { const md = e.target.closest('[data-modo]'); if (md) { procura.modo = md.dataset.modo; return desenhar(); } const li = e.target.closest('li[data-id]'); if (li) abrirFornecedor(L0.find(f => String(f.id) === li.dataset.id)); };
   }
   /* ---------- v341: Stock (M010) — artigos do armazém; procura pelas primeiras letras de cada palavra ---------- */
+  /* v342: Clientes e Fornecedores no mesmo separador (Contactos) */
+  const CONT342 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['clientes', '👥 Clientes'], ['fornecedores', '🏭 Fornecedores']].map(([k, t]) => '<button data-cont="' + k + '" style="flex:1;' + (aba === k ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>').join('') + '</div>';
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-cont]'); if (!b) return; e.stopPropagation(); e.preventDefault(); aba = procura.cont = b.dataset.cont; ecraExtra = null; desenhar(); window.scrollTo(0, 0); }, true);
   const MODOS341 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['forn', '🏭 Fornecedores'], ['stock', '📦 Stock']].map(([k, t]) => { const on = (procura.modo === 'stock') === (k === 'stock'); return '<button data-modo="' + k + '" style="flex:1;' + (on ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>'; }).join('') + '</div>';
   function vStock(m) {
-    const L0 = D.stockV341, cab = topo().replace('M005 · Fornecedores', 'M010 · Stock') + MODOS341();
+    const L0 = D.stockV341, cab = topo();   // v342: separador próprio
     m.onclick = e => { const md = e.target.closest('[data-modo]'); if (md) { procura.modo = md.dataset.modo; return desenhar(); } if (e.target.closest('[data-mais]')) { procura.lim = (procura.lim || 200) + 200; vStock(m); } };
     if (!Array.isArray(L0)) { m.innerHTML = cab + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 341 e carregue em ⟳ Atualizar.</p></div>'; return; }
     const ps = sem(procura.s || '').split(/\s+/).filter(Boolean);
