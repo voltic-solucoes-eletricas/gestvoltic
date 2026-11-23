@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '245';
+  const VERSAO = '341';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -1194,16 +1194,35 @@
   }
   /* ---------- Fornecedores ---------- */
   function vFornecedores(m) {
+    if (procura.modo === 'stock') return vStock(m);   // v341
     const L0 = D.fornecedores;
     if (!Array.isArray(L0)) { m.innerHTML = topo() + '<div class="cartao"><h2>Fornecedores</h2><p>O ficheiro do PC ainda não traz os fornecedores: instale no PC a versão 299 e carregue em ⟳ Atualizar.</p></div>'; return; }
     const q = sem(procura.f);
     let fs = L0.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt'));
     if (q) fs = fs.filter(f => sem([f.name, f.nif, f.phone, f.email, f.address, f.town, ...(f.pessoas || []).map(p => p.nome + ' ' + p.tel + ' ' + p.email)].join(' ')).includes(q));
-    m.innerHTML = topo() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone, pessoa…" value="' + h(procura.f) + '"><p class="nota">' + fs.length + ' fornecedor(es)</p><ul class="lista">' +
+    m.innerHTML = topo() + MODOS341() + '<input type="search" id="q" placeholder="Procurar nome, NIF, telefone, pessoa…" value="' + h(procura.f) + '"><p class="nota">' + fs.length + ' fornecedor(es)</p><ul class="lista">' +
       fs.slice(0, 200).map(f => '<li class="toque" data-id="' + h(f.id) + '"><div class="t">' + h(f.name) + '</div><div class="s">' + h([f.phone, f.town, (f.pessoas || []).map(p => p.nome).filter(Boolean).join(', ')].filter(Boolean).join(' · ')) + '</div></li>').join('') + '</ul>' +
       (fs.length > 200 ? '<p class="nota">Mostra os primeiros 200: use a procura.</p>' : '');
     const q2 = $('#q'); q2.oninput = () => { procura.f = q2.value; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vFornecedores(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
-    m.onclick = e => { const li = e.target.closest('li[data-id]'); if (li) abrirFornecedor(L0.find(f => String(f.id) === li.dataset.id)); };
+    m.onclick = e => { const md = e.target.closest('[data-modo]'); if (md) { procura.modo = md.dataset.modo; return desenhar(); } const li = e.target.closest('li[data-id]'); if (li) abrirFornecedor(L0.find(f => String(f.id) === li.dataset.id)); };
+  }
+  /* ---------- v341: Stock (M010) — artigos do armazém; procura pelas primeiras letras de cada palavra ---------- */
+  const MODOS341 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['forn', '🏭 Fornecedores'], ['stock', '📦 Stock']].map(([k, t]) => { const on = (procura.modo === 'stock') === (k === 'stock'); return '<button data-modo="' + k + '" style="flex:1;' + (on ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>'; }).join('') + '</div>';
+  function vStock(m) {
+    const L0 = D.stockV341, cab = topo().replace('M005 · Fornecedores', 'M010 · Stock') + MODOS341();
+    m.onclick = e => { const md = e.target.closest('[data-modo]'); if (md) { procura.modo = md.dataset.modo; return desenhar(); } if (e.target.closest('[data-mais]')) { procura.lim = (procura.lim || 200) + 200; vStock(m); } };
+    if (!Array.isArray(L0)) { m.innerHTML = cab + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 341 e carregue em ⟳ Atualizar.</p></div>'; return; }
+    const ps = sem(procura.s || '').split(/\s+/).filter(Boolean);
+    let L = ps.length ? L0.filter(x => { const w = sem(x.d + ' ' + x.c + ' ' + x.f).split(/[^a-z0-9]+/).filter(Boolean); return ps.every(p => w.some(z => z.startsWith(p))); }) : L0.slice();
+    if (procura.so) L = L.filter(x => Number(x.q) > 0);
+    L.sort((a, b) => (Number(b.q) > 0) - (Number(a.q) > 0) || String(a.d).localeCompare(String(b.d), 'pt'));
+    const lim = procura.lim || 200, qt = v => (Math.round(Number(v) * 1000) / 1000).toLocaleString('pt-PT');
+    m.innerHTML = cab + '<input type="search" id="q" placeholder="Procurar: primeiras letras das palavras (ex.: «cab 2,5»)" value="' + h(procura.s || '') + '">' +
+      '<p class="nota"><label><input type="checkbox" id="so341"' + (procura.so ? ' checked' : '') + '> Só com stock</label> · ' + L.length + ' artigo(s)</p><ul class="lista">' +
+      L.slice(0, lim).map(x => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + h(x.d) + '</span><b style="white-space:nowrap' + (Number(x.q) > 0 ? '' : ';color:#888') + '">' + qt(x.q) + ' ' + h(x.u || '') + '</b></div><div class="s">' + h([x.c, x.f].filter(Boolean).join(' · ')) + (x.p != null ? ' · último preço ' + eur(x.p) + (x.u ? '/' + h(x.u) : '') : '') + (x.dt ? ' · ' + h(x.dt.split('-').reverse().join('/')) : '') + '</div></li>').join('') + '</ul>' +
+      (L.length > lim ? '<p><button data-mais="1" style="width:100%">Mostrar mais (' + (L.length - lim) + ')</button></p>' : '');
+    const q2 = $('#q'); q2.oninput = () => { procura.s = q2.value; procura.lim = 200; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vStock(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
+    $('#so341').onchange = e => { procura.so = e.target.checked; procura.lim = 200; vStock(m); };
   }
   function abrirFornecedor(f) {
     if (!f) return;
