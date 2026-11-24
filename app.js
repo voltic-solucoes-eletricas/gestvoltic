@@ -15,7 +15,8 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '343';
+  const VERSAO = '346';
+  try { document.head.insertAdjacentHTML('beforeend', '<style id="v346">input[type=search],input[type=text],input:not([type]),textarea{background:#fff8dc;border:1px solid #c9b46a}input[type=search]:focus,input[type=text]:focus,input:not([type]):focus,textarea:focus{outline:none;border-color:#1f6f8b;box-shadow:0 0 0 2px rgba(31,111,139,.25)}@media (prefers-color-scheme:dark){input[type=search],input[type=text],input:not([type]),textarea{background:#3a3520;color:#f3ead0;border-color:#7a6a3a}}</style>'); } catch (_) { }   // v346: campos onde se escreve com cor própria
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -1224,7 +1225,7 @@
     if (!Array.isArray(L0)) { m.innerHTML = cab + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 343 e carregue em ⟳ Atualizar.</p></div>'; return; }
     L0.forEach((x, i) => { x._i = i; });
     const ps = sem(procura.s || '').split(/\s+/).filter(Boolean), ord = procura.ord || 'barato';
-    let L = ps.length ? L0.filter(x => { const w = x._w || (x._w = sem([x.d, x.c, x.f, ...(x.fs || []).map(f => f.f)].join(' ')).split(/[^a-z0-9]+/).filter(Boolean)); return ps.every(p => w.some(z => z.startsWith(p))); }) : L0.slice();
+    let L = ps.length ? L0.filter(x => { const w = x._w || (x._w = sem([x.d, x.c, x.f, x.mc || '', ...(x.fs || []).map(f => f.f)].join(' ')).split(/[^a-z0-9]+/).filter(Boolean)); return ps.every(p => w.some(z => z.startsWith(p))); }) : L0.slice();
     if (procura.so) L = L.filter(x => Number(x.q) > 0);
     const pb = x => x.p == null ? Infinity : x.p;
     const O = { barato: (a, b) => pb(a) - pb(b), caro: (a, b) => (b.p ?? -1) - (a.p ?? -1), recente: (a, b) => String(b.dt || '').localeCompare(String(a.dt || '')), antiga: (a, b) => String(a.dt || '9').localeCompare(String(b.dt || '9')), nome: (a, b) => String(a.d).localeCompare(String(b.d), 'pt') };
@@ -1234,7 +1235,7 @@
       '<p class="nota" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="ord343">' + [['barato', 'Mais barato primeiro'], ['caro', 'Mais caro primeiro'], ['recente', 'Compra mais recente'], ['antiga', 'Compra mais antiga'], ['nome', 'Nome']].map(([k, t]) => '<option value="' + k + '"' + (k === ord ? ' selected' : '') + '>' + t + '</option>').join('') + '</select>' +
       '<label><input type="checkbox" id="so341"' + (procura.so ? ' checked' : '') + '> Só o que tenho em stock</label> · ' + L.length + ' artigo(s)</p><ul class="lista">' +
       L.slice(0, lim).map(x => { const fs = x.fs || [], b = fs[0]; return '<li class="toque" data-i="' + x._i + '"><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + h(x.d) + '</span><b style="white-space:nowrap;color:' + (Number(x.q) > 0 ? '#1b7a3d' : '#888') + '">' + qt(x.q) + ' ' + h(x.u || '') + '</b></div><div class="s">' +
-        (b ? '✅ <b>' + h(b.f) + '</b>' + (b.cot ? ' (cotação)' : '') + ' ' + eur(b.p) + (x.u ? '/' + h(x.u) : '') + (b.dt ? ' · ' + ddS(b.dt) : '') + (velho343(b.dt) ? ' · preço antigo' : '') + (fs.length > 1 ? ' · +' + (fs.length - 1) + ' fornecedor(es)' : '') : (x.p != null ? 'último preço ' + eur(x.p) : 'sem preço')) + (x.c ? ' · ' + h(x.c) : '') + '</div></li>'; }).join('') + '</ul>' +
+        (b ? '✅ <b>' + h(b.f) + '</b>' + (b.cot ? ' (cotação)' : '') + ' ' + eur(b.p) + (x.u ? '/' + h(x.u) : '') + (b.dt ? ' · ' + ddS(b.dt) : '') + (velho343(b.dt) ? ' · preço antigo' : '') + (fs.length > 1 ? ' · +' + (fs.length - 1) + ' fornecedor(es)' : '') : (x.p != null ? 'último preço ' + eur(x.p) : 'sem preço')) + (x.mc ? ' · <b>' + h(x.mc) + '</b>' : '') + (x.c ? ' · ' + h(x.c) : '') + '</div></li>'; }).join('') + '</ul>' +
       (L.length > lim ? '<p><button data-mais="1" style="width:100%">Mostrar mais (' + (L.length - lim) + ')</button></p>' : '');
     const q2 = $('#q'); q2.oninput = () => { procura.s = q2.value; procura.lim = 150; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vStock(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
     $('#so341').onchange = e => { procura.so = e.target.checked; procura.lim = 150; vStock(m); };
@@ -1245,7 +1246,7 @@
     ecraExtra = m => {
       const fs = x.fs || [], hs = x.h || [];
       m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + h(x.d) + '</h2><dl class="det">' +
-        (x.c ? '<dt>Referência</dt><dd>' + h(x.c) + '</dd>' : '') + '<dt>Em stock</dt><dd><b>' + qt(x.q) + ' ' + h(x.u || '') + '</b></dd>' +
+        (x.mc ? '<dt>Marca</dt><dd>' + h(x.mc) + '</dd>' : '') + (x.c ? '<dt>Referência</dt><dd>' + h(x.c) + '</dd>' : '') + '<dt>Em stock</dt><dd><b>' + qt(x.q) + ' ' + h(x.u || '') + '</b></dd>' +
         (x.e != null ? '<dt>Compras desde o início do stock</dt><dd>' + qt(x.e) + '</dd><dt>Entradas manuais / contagens</dt><dd>' + qt(x.mn) + '</dd><dt>Saídas para obras</dt><dd>' + qt(-x.ob) + '</dd><dt>Gasto em produções</dt><dd>' + qt(-x.pr) + '</dd>' : '') +
         (x.p != null ? '<dt>Custo unitário (mais barato)</dt><dd>' + eur(x.p) + '</dd><dt>Valor em stock</dt><dd>' + eur(Number(x.q) > 0 ? x.q * x.p : 0) + '</dd>' : '') + '</dl></div>' +
         '<div class="cartao"><h3>Onde comprar (do mais barato para o mais caro)</h3><ul class="lista">' + (fs.length ? fs.map((f, i) => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + (i === 0 ? '✅ ' : '') + h(f.f) + (f.cot ? ' <small>(cotação)</small>' : '') + '</span><b>' + eur(f.p) + (x.u ? '/' + h(x.u) : '') + '</b></div><div class="s">última compra ' + (f.dt ? ddS(f.dt) : 'sem data') + (f.n ? ' · ' + h(f.n) : '') + (velho343(f.dt) ? ' · <b>preço antigo — confirmar</b>' : '') + '</div></li>').join('') : '<li>Sem compras registadas.</li>') + '</ul></div>' +
