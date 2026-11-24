@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '346';
+  const VERSAO = '348';
   try { document.head.insertAdjacentHTML('beforeend', '<style id="v346">input[type=search],input[type=text],input:not([type]),textarea{background:#fff8dc;border:1px solid #c9b46a}input[type=search]:focus,input[type=text]:focus,input:not([type]):focus,textarea:focus{outline:none;border-color:#1f6f8b;box-shadow:0 0 0 2px rgba(31,111,139,.25)}@media (prefers-color-scheme:dark){input[type=search],input[type=text],input:not([type]),textarea{background:#3a3520;color:#f3ead0;border-color:#7a6a3a}}</style>'); } catch (_) { }   // v346: campos onde se escreve com cor própria
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -344,7 +344,7 @@
     const porGuardar = vivas().filter(n => !n.guardadaEm || n.alterada > n.guardadaEm);
     m.innerHTML = '<p class="linha">' + (FILA ? '<button class="btn" data-recebidas>📥 Fotografias recebidas (' + FILA + ')</button>' : '') + '<button class="btn" data-voz>🎤 Nota por voz</button><button class="btn" data-nova>+ Nova anotação</button>' + (gLigado() ? (porGuardar.length ? '<button class="btn sec" data-guardar>⤴ Enviar agora (' + porGuardar.length + ')</button>' : '') : '<button class="btn sec" data-guardar' + (porGuardar.length ? '' : ' disabled') + '>⤴ Guardar anotações (' + porGuardar.length + ')</button>') + '</p>' +
       (gLigado() ? '<p class="nota">☁ Ligado ao Google Drive: ao gravar, a anotação vai logo para o PC e fica lá guardada (<span id="gsinc">' + h(gEstado || '…') + '</span>).</p>' : '<p class="nota">«Guardar anotações» cria um ficheiro: escolha a pasta <b>GestVoltic_movel › anotacoes</b>. Para passar sozinho, ligue ao Google Drive em Ferramentas › Entrada e versão.</p>') +   // v236
-      tarefasHtml() + blocoPC() + (vivas().filter(n => !['agenda', 'ponto'].includes(n.tipoNota)).length ? '<ul class="lista">' + vivas().filter(n => !['agenda', 'ponto'].includes(n.tipoNota)).sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
+      tarefasHtml() + blocoPC() + (vivas().filter(n => !['agenda', 'ponto', 'contagem'].includes(n.tipoNota)).length ? '<ul class="lista">' + vivas().filter(n => !['agenda', 'ponto', 'contagem'].includes(n.tipoNota)).sort((a, b) => b.criada.localeCompare(a.criada)).map(n =>
         '<li class="toque" data-nota="' + h(n.id) + '"><div class="t">' + (n.ref ? h(n.ref) + ' · ' : '') + h(n.assunto || n.nome || 'Anotação') + '</div><div class="s">' + h(quando(n.criada)) +
         (n.telefone ? ' · ' + h(n.telefone) : '') + (n.desenho ? ' · ✏️' : '') + (n.fotos?.length ? ' · 📷' + n.fotos.length : '') + '</div><div>' +
         (!n.guardadaEm ? '<span class="chip am">' + (gLigado() ? 'por enviar ao PC' : 'por guardar') + '</span>' : n.alterada > n.guardadaEm ? '<span class="chip am">alterada — ' + (gLigado() ? 'por enviar ao PC' : 'por guardar') + '</span>' : '<span class="chip ok">' + (gLigado() ? 'no PC desde ' : 'guardada ') + h(quando(n.guardadaEm)) + '</span>') + chipAnalise(n) + '</div></li>').join('') + '</ul>'
@@ -1212,6 +1212,16 @@
   }
   /* ---------- v341: Stock (M010) — artigos do armazém; procura pelas primeiras letras de cada palavra ---------- */
   /* v342: Clientes e Fornecedores no mesmo separador (Contactos) */
+  /* v348: contagem do stock pelo telemóvel — vai como anotação; o PC acerta o stock */
+  let ultimo348 = null;
+  const pend348 = k => { const x = N.find(n => n.tipoNota === 'contagem' && n.k === k && !n.retiradaEm && Date.parse(n.criada || 0) > Date.now() - 86400000); return x ? x.qtd + ' ' + (x.unidade || '') : ''; };
+  document.addEventListener('click', async e => {
+    if (!e.target || e.target.id !== 'ctb348') return; e.preventDefault(); e.stopPropagation();
+    const x = ultimo348, campo = $('#ct348'), txt = String((campo && campo.value) || '').trim(), v = Number(txt.replace(',', '.'));
+    if (!x || !x.k) return; if (!txt || !isFinite(v) || v < 0) return alert('Escreva a quantidade que contou.');
+    const n = Object.assign(novaNota(null), { tipoNota: 'contagem', k: x.k, qtd: v, stockApp: x.q, desc: x.d, unidade: x.u || '', assunto: 'Contagem: ' + x.d + ' = ' + v + ' ' + (x.u || ''), titulo: '', texto: '', estado: 'pendente' });
+    N.push(n); await guardarNotas(); alert('Contagem enviada: ' + v + ' ' + (x.u || '') + '. O PC acerta o stock nos próximos minutos.'); desenhar();
+  }, true);
   const CONT342 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['clientes', '👥 Clientes'], ['fornecedores', '🏭 Fornecedores']].map(([k, t]) => '<button data-cont="' + k + '" style="flex:1;' + (aba === k ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>').join('') + '</div>';
   document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-cont]'); if (!b) return; e.stopPropagation(); e.preventDefault(); aba = procura.cont = b.dataset.cont; ecraExtra = null; desenhar(); window.scrollTo(0, 0); }, true);
   const MODOS341 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['forn', '🏭 Fornecedores'], ['stock', '📦 Stock']].map(([k, t]) => { const on = (procura.modo === 'stock') === (k === 'stock'); return '<button data-modo="' + k + '" style="flex:1;' + (on ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>'; }).join('') + '</div>';
@@ -1248,7 +1258,8 @@
       m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + h(x.d) + '</h2><dl class="det">' +
         (x.mc ? '<dt>Marca</dt><dd>' + h(x.mc) + '</dd>' : '') + (x.c ? '<dt>Referência</dt><dd>' + h(x.c) + '</dd>' : '') + '<dt>Em stock</dt><dd><b>' + qt(x.q) + ' ' + h(x.u || '') + '</b></dd>' +
         (x.e != null ? '<dt>Compras desde o início do stock</dt><dd>' + qt(x.e) + '</dd><dt>Entradas manuais / contagens</dt><dd>' + qt(x.mn) + '</dd><dt>Saídas para obras</dt><dd>' + qt(-x.ob) + '</dd><dt>Gasto em produções</dt><dd>' + qt(-x.pr) + '</dd>' : '') +
-        (x.p != null ? '<dt>Custo unitário (mais barato)</dt><dd>' + eur(x.p) + '</dd><dt>Valor em stock</dt><dd>' + eur(Number(x.q) > 0 ? x.q * x.p : 0) + '</dd>' : '') + '</dl></div>' +
+        (x.p != null ? '<dt>Custo unitário (mais barato)</dt><dd>' + eur(x.p) + '</dd><dt>Valor em stock</dt><dd>' + eur(Number(x.q) > 0 ? x.q * x.p : 0) + '</dd>' : '') + '</dl></div>' + (ultimo348 = x, '') +
+        (x.k ? '<div class="cartao"><h3>📋 Contagem</h3>' + (pend348(x.k) ? '<p class="nota"><b>Contagem enviada: ' + h(pend348(x.k)) + '</b> — o PC acerta nos próximos minutos.</p>' : '') + '<p class="nota">Conte o que está no armazém e envie: o PC acerta o stock (fica no histórico do artigo como contagem).</p><input type="number" id="ct348" inputmode="decimal" step="any" placeholder="quantidade contada" style="width:55%"> <button id="ctb348">Enviar contagem</button></div>' : '') +
         '<div class="cartao"><h3>Onde comprar (do mais barato para o mais caro)</h3><ul class="lista">' + (fs.length ? fs.map((f, i) => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + (i === 0 ? '✅ ' : '') + h(f.f) + (f.cot ? ' <small>(cotação)</small>' : '') + '</span><b>' + eur(f.p) + (x.u ? '/' + h(x.u) : '') + '</b></div><div class="s">última compra ' + (f.dt ? ddS(f.dt) : 'sem data') + (f.n ? ' · ' + h(f.n) : '') + (velho343(f.dt) ? ' · <b>preço antigo — confirmar</b>' : '') + '</div></li>').join('') : '<li>Sem compras registadas.</li>') + '</ul></div>' +
         '<div class="cartao"><h3>Compras</h3><ul class="lista">' + (hs.length ? hs.map(c => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + ddS(c.dt) + ' · ' + h(c.f) + '</span><b>' + qt(c.q) + ' × ' + eur(c.p) + '</b></div><div class="s">' + h(c.n || '') + '</div></li>').join('') : '<li>Sem compras registadas.</li>') + '</ul></div>';
       m.onclick = e => { if (e.target.closest('.voltar')) { ecraExtra = null; return desenhar(); } };
