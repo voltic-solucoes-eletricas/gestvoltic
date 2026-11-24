@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '342';
+  const VERSAO = '343';
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let OCULTAR = (() => { try { return localStorage.getItem('gv_ocultar') === '1'; } catch (_) { return false; } })();   // v239: 👁
@@ -1214,21 +1214,45 @@
   const CONT342 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['clientes', '👥 Clientes'], ['fornecedores', '🏭 Fornecedores']].map(([k, t]) => '<button data-cont="' + k + '" style="flex:1;' + (aba === k ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>').join('') + '</div>';
   document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-cont]'); if (!b) return; e.stopPropagation(); e.preventDefault(); aba = procura.cont = b.dataset.cont; ecraExtra = null; desenhar(); window.scrollTo(0, 0); }, true);
   const MODOS341 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['forn', '🏭 Fornecedores'], ['stock', '📦 Stock']].map(([k, t]) => { const on = (procura.modo === 'stock') === (k === 'stock'); return '<button data-modo="' + k + '" style="flex:1;' + (on ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>'; }).join('') + '</div>';
+  /* v343: Stock (M010) — um artigo por cartão: stock e fornecedores do mais barato para o mais caro; ordenar; tocar = compras e colunas do PC */
+  const ddS = s => s ? String(s).slice(0, 10).split('-').reverse().join('/') : '';
+  const qt = v => (Math.round(Number(v || 0) * 1000) / 1000).toLocaleString('pt-PT');
+  const velho343 = s => s && (Date.now() - Date.parse(s)) / 864e5 > 183;
   function vStock(m) {
-    const L0 = D.stockV341, cab = topo();   // v342: separador próprio
-    m.onclick = e => { const md = e.target.closest('[data-modo]'); if (md) { procura.modo = md.dataset.modo; return desenhar(); } if (e.target.closest('[data-mais]')) { procura.lim = (procura.lim || 200) + 200; vStock(m); } };
-    if (!Array.isArray(L0)) { m.innerHTML = cab + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 341 e carregue em ⟳ Atualizar.</p></div>'; return; }
-    const ps = sem(procura.s || '').split(/\s+/).filter(Boolean);
-    let L = ps.length ? L0.filter(x => { const w = sem(x.d + ' ' + x.c + ' ' + x.f).split(/[^a-z0-9]+/).filter(Boolean); return ps.every(p => w.some(z => z.startsWith(p))); }) : L0.slice();
+    const L0 = D.stockV341, cab = topo();
+    m.onclick = e => { if (e.target.closest('[data-mais]')) { procura.lim = (procura.lim || 150) + 150; return vStock(m); } const li = e.target.closest('li[data-i]'); if (li) abrirStock(L0[+li.dataset.i]); };
+    if (!Array.isArray(L0)) { m.innerHTML = cab + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 343 e carregue em ⟳ Atualizar.</p></div>'; return; }
+    L0.forEach((x, i) => { x._i = i; });
+    const ps = sem(procura.s || '').split(/\s+/).filter(Boolean), ord = procura.ord || 'barato';
+    let L = ps.length ? L0.filter(x => { const w = x._w || (x._w = sem([x.d, x.c, x.f, ...(x.fs || []).map(f => f.f)].join(' ')).split(/[^a-z0-9]+/).filter(Boolean)); return ps.every(p => w.some(z => z.startsWith(p))); }) : L0.slice();
     if (procura.so) L = L.filter(x => Number(x.q) > 0);
-    L.sort((a, b) => (Number(b.q) > 0) - (Number(a.q) > 0) || String(a.d).localeCompare(String(b.d), 'pt'));
-    const lim = procura.lim || 200, qt = v => (Math.round(Number(v) * 1000) / 1000).toLocaleString('pt-PT');
-    m.innerHTML = cab + '<input type="search" id="q" placeholder="Procurar: primeiras letras das palavras (ex.: «cab 2,5»)" value="' + h(procura.s || '') + '">' +
-      '<p class="nota"><label><input type="checkbox" id="so341"' + (procura.so ? ' checked' : '') + '> Só com stock</label> · ' + L.length + ' artigo(s)</p><ul class="lista">' +
-      L.slice(0, lim).map(x => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + h(x.d) + '</span><b style="white-space:nowrap' + (Number(x.q) > 0 ? '' : ';color:#888') + '">' + qt(x.q) + ' ' + h(x.u || '') + '</b></div><div class="s">' + h([x.c, x.f].filter(Boolean).join(' · ')) + (x.p != null ? ' · último preço ' + eur(x.p) + (x.u ? '/' + h(x.u) : '') : '') + (x.dt ? ' · ' + h(x.dt.split('-').reverse().join('/')) : '') + '</div></li>').join('') + '</ul>' +
+    const pb = x => x.p == null ? Infinity : x.p;
+    const O = { barato: (a, b) => pb(a) - pb(b), caro: (a, b) => (b.p ?? -1) - (a.p ?? -1), recente: (a, b) => String(b.dt || '').localeCompare(String(a.dt || '')), antiga: (a, b) => String(a.dt || '9').localeCompare(String(b.dt || '9')), nome: (a, b) => String(a.d).localeCompare(String(b.d), 'pt') };
+    L.sort(O[ord] || O.barato);
+    const lim = procura.lim || 150;
+    m.innerHTML = cab + '<input type="search" id="q" placeholder="Procurar: primeiras letras (ex.: «contac 2na»)" value="' + h(procura.s || '') + '">' +
+      '<p class="nota" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="ord343">' + [['barato', 'Mais barato primeiro'], ['caro', 'Mais caro primeiro'], ['recente', 'Compra mais recente'], ['antiga', 'Compra mais antiga'], ['nome', 'Nome']].map(([k, t]) => '<option value="' + k + '"' + (k === ord ? ' selected' : '') + '>' + t + '</option>').join('') + '</select>' +
+      '<label><input type="checkbox" id="so341"' + (procura.so ? ' checked' : '') + '> Só o que tenho em stock</label> · ' + L.length + ' artigo(s)</p><ul class="lista">' +
+      L.slice(0, lim).map(x => { const fs = x.fs || [], b = fs[0]; return '<li class="toque" data-i="' + x._i + '"><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + h(x.d) + '</span><b style="white-space:nowrap;color:' + (Number(x.q) > 0 ? '#1b7a3d' : '#888') + '">' + qt(x.q) + ' ' + h(x.u || '') + '</b></div><div class="s">' +
+        (b ? '✅ <b>' + h(b.f) + '</b>' + (b.cot ? ' (cotação)' : '') + ' ' + eur(b.p) + (x.u ? '/' + h(x.u) : '') + (b.dt ? ' · ' + ddS(b.dt) : '') + (velho343(b.dt) ? ' · preço antigo' : '') + (fs.length > 1 ? ' · +' + (fs.length - 1) + ' fornecedor(es)' : '') : (x.p != null ? 'último preço ' + eur(x.p) : 'sem preço')) + (x.c ? ' · ' + h(x.c) : '') + '</div></li>'; }).join('') + '</ul>' +
       (L.length > lim ? '<p><button data-mais="1" style="width:100%">Mostrar mais (' + (L.length - lim) + ')</button></p>' : '');
-    const q2 = $('#q'); q2.oninput = () => { procura.s = q2.value; procura.lim = 200; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vStock(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
-    $('#so341').onchange = e => { procura.so = e.target.checked; procura.lim = 200; vStock(m); };
+    const q2 = $('#q'); q2.oninput = () => { procura.s = q2.value; procura.lim = 150; clearTimeout(q2._t); q2._t = setTimeout(() => { const pos = q2.selectionStart; vStock(m); const n = $('#q'); n.focus(); n.setSelectionRange(pos, pos); }, 250); };
+    $('#so341').onchange = e => { procura.so = e.target.checked; procura.lim = 150; vStock(m); };
+    $('#ord343').onchange = e => { procura.ord = e.target.value; vStock(m); };
+  }
+  function abrirStock(x) {
+    if (!x) return;
+    ecraExtra = m => {
+      const fs = x.fs || [], hs = x.h || [];
+      m.innerHTML = '<button class="voltar">‹ Voltar</button><div class="cartao"><h2>' + h(x.d) + '</h2><dl class="det">' +
+        (x.c ? '<dt>Referência</dt><dd>' + h(x.c) + '</dd>' : '') + '<dt>Em stock</dt><dd><b>' + qt(x.q) + ' ' + h(x.u || '') + '</b></dd>' +
+        (x.e != null ? '<dt>Compras desde o início do stock</dt><dd>' + qt(x.e) + '</dd><dt>Entradas manuais / contagens</dt><dd>' + qt(x.mn) + '</dd><dt>Saídas para obras</dt><dd>' + qt(-x.ob) + '</dd><dt>Gasto em produções</dt><dd>' + qt(-x.pr) + '</dd>' : '') +
+        (x.p != null ? '<dt>Custo unitário (mais barato)</dt><dd>' + eur(x.p) + '</dd><dt>Valor em stock</dt><dd>' + eur(Number(x.q) > 0 ? x.q * x.p : 0) + '</dd>' : '') + '</dl></div>' +
+        '<div class="cartao"><h3>Onde comprar (do mais barato para o mais caro)</h3><ul class="lista">' + (fs.length ? fs.map((f, i) => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + (i === 0 ? '✅ ' : '') + h(f.f) + (f.cot ? ' <small>(cotação)</small>' : '') + '</span><b>' + eur(f.p) + (x.u ? '/' + h(x.u) : '') + '</b></div><div class="s">última compra ' + (f.dt ? ddS(f.dt) : 'sem data') + (f.n ? ' · ' + h(f.n) : '') + (velho343(f.dt) ? ' · <b>preço antigo — confirmar</b>' : '') + '</div></li>').join('') : '<li>Sem compras registadas.</li>') + '</ul></div>' +
+        '<div class="cartao"><h3>Compras</h3><ul class="lista">' + (hs.length ? hs.map(c => '<li><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + ddS(c.dt) + ' · ' + h(c.f) + '</span><b>' + qt(c.q) + ' × ' + eur(c.p) + '</b></div><div class="s">' + h(c.n || '') + '</div></li>').join('') : '<li>Sem compras registadas.</li>') + '</ul></div>';
+      m.onclick = e => { if (e.target.closest('.voltar')) { ecraExtra = null; return desenhar(); } };
+    };
+    desenhar(); window.scrollTo(0, 0);
   }
   function abrirFornecedor(f) {
     if (!f) return;
