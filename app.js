@@ -15,7 +15,7 @@
    v242: fase (centro de custo) nos Tempos; obra de estrutura do ano (AACOM000) na lista de obras. */
 (() => {
   'use strict';
-  const VERSAO = '348';
+  const VERSAO = '365';
   try { document.head.insertAdjacentHTML('beforeend', '<style id="v346">input[type=search],input[type=text],input:not([type]),textarea{background:#fff8dc;border:1px solid #c9b46a}input[type=search]:focus,input[type=text]:focus,input:not([type]):focus,textarea:focus{outline:none;border-color:#1f6f8b;box-shadow:0 0 0 2px rgba(31,111,139,.25)}@media (prefers-color-scheme:dark){input[type=search],input[type=text],input:not([type]),textarea{background:#3a3520;color:#f3ead0;border-color:#7a6a3a}}</style>'); } catch (_) { }   // v346: campos onde se escreve com cor própria
   const $ = s => document.querySelector(s);
   const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1229,10 +1229,88 @@
   const ddS = s => s ? String(s).slice(0, 10).split('-').reverse().join('/') : '';
   const qt = v => (Math.round(Number(v || 0) * 1000) / 1000).toLocaleString('pt-PT');
   const velho343 = s => s && (Date.now() - Date.parse(s)) / 864e5 > 183;
+  /* v365: Base de preços (tabelas dos fornecedores do PC) no separador Stock. O PC grava-a no Google Drive (GestVoltic_movel › base,
+     um ficheiro por marca + indice.json); a app descarrega-a uma vez (depois só as marcas que mudaram) e procura sem rede. */
+  const B365 = { ind: null, txt: {}, nrm: {}, estado: '', tent: 0, aDesc: false };
+  const MOD365 = () => '<div style="display:flex;gap:6px;margin:4px 0 8px">' + [['s', '📦 Stock'], ['b', '📚 Base de preços']].map(([k, t]) => { const on = (k === 'b') === !!procura.base365; return '<button data-b365="' + k + '" style="flex:1;' + (on ? 'font-weight:700;border:2px solid #1f6f8b' : 'opacity:.75') + '">' + t + '</button>'; }).join('') + '</div>';
+  document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-b365]'); if (!b) return; e.stopPropagation(); e.preventDefault(); procura.base365 = b.dataset.b365 === 'b'; procura.lim = 150; desenhar(); window.scrollTo(0, 0); }, true);
+  async function base365Ind() { if (!B365.ind) { try { B365.ind = await ler('base365_ind'); } catch (_) { B365.ind = null; } } return B365.ind; }
+  async function base365Descarregar(interativo, avisa) {
+    if (B365.aDesc) return 0;
+    if (!gLigado()) throw new Error('ligue primeiro o Google Drive em ⟳ Atualizar');
+    if (!gValido()) { if (!interativo) return 0; await gToken(false); }
+    B365.aDesc = true;
+    try {
+      const P = await gPastasDe();
+      const pb = (await gQ("name='base' and mimeType='application/vnd.google-apps.folder' and '" + P.raiz + "' in parents and trashed=false"))[0];
+      if (!pb) throw new Error('a Base ainda não está no Google Drive (no PC: 📱 Telemóvel e tablet › Enviar a Base agora)');
+      const fs = ((await (await gApi('https://www.googleapis.com/drive/v3/files?pageSize=500&fields=files(id,name)&q=' + encodeURIComponent("'" + pb.id + "' in parents and trashed=false"))).json()).files || []);
+      const id = {}; fs.forEach(f => { id[f.name] = f.id; });
+      if (!id['indice.json']) throw new Error('falta o indice.json da Base no Google Drive');
+      const ind = await (await gApi('https://www.googleapis.com/drive/v3/files/' + id['indice.json'] + '?alt=media')).json();
+      if (ind.formato !== 'gestvoltic-base-1') throw new Error('o indice.json da Base não é deste programa');
+      const velho = (await base365Ind()) || { marcas: [] }, hv = {}; (velho.marcas || []).forEach(x => { hv[x.m] = x.h; });
+      let n = 0, i = 0;
+      for (const x of ind.marcas) {
+        i++;
+        if (hv[x.m] === x.h && B365.txt[x.m]) continue;
+        if (hv[x.m] === x.h) { let tem = null; try { tem = await ler('base365_' + x.m); } catch (_) { } if (tem) continue; }
+        if (!id[x.f]) continue;
+        if (avisa) avisa('A descarregar ' + x.m + ' (' + i + ' de ' + ind.marcas.length + ')…');
+        const b = new Uint8Array(await (await gApi('https://www.googleapis.com/drive/v3/files/' + id[x.f] + '?alt=media')).arrayBuffer());
+        const txt = b[0] === 0x1f && b[1] === 0x8b ? await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream('gzip'))).text() : new TextDecoder().decode(b);
+        await gravar('base365_' + x.m, txt); delete B365.txt[x.m]; delete B365.nrm[x.m]; n++;
+      }
+      await gravar('base365_ind', ind); B365.ind = ind;
+      return n;
+    } finally { B365.aDesc = false; }
+  }
+  async function base365Procura(q, marca) {
+    const ind = await base365Ind(), ps = sem(q).split(/\s+/).filter(Boolean); if (!ind || !ps.length) return { L: [], mais: false };
+    const L = [];
+    for (const x of ind.marcas) {
+      if (marca && marca !== x.m) continue;
+      if (!B365.txt[x.m]) { let t = null; try { t = await ler('base365_' + x.m); } catch (_) { } if (!t) continue; B365.txt[x.m] = t.split('\n'); B365.nrm[x.m] = sem(t).split('\n'); }
+      const T = B365.txt[x.m], Nn = B365.nrm[x.m];
+      for (let i = 0; i < Nn.length; i++) {
+        const s = Nn[i];
+        if (!ps.every(p => s.startsWith(p) || s.includes(' ' + p) || s.includes('\t' + p) || s.includes('-' + p) || s.includes('/' + p))) continue;
+        L.push([x.m, T[i]]); if (L.length >= 300) return { L, mais: true };
+      }
+    }
+    return { L, mais: false };
+  }
+  function vBase365(m) {
+    const cab = topo();
+    m.onclick = null;
+    m.innerHTML = cab + MOD365() + '<input type="search" id="q365" placeholder="Procurar na Base: primeiras letras ou referência" value="' + h(procura.s365 || '') + '">' +
+      '<p class="nota" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="m365"><option value="">Todas as marcas</option></select> <span id="n365"></span></p><ul class="lista" id="l365"></ul><div class="cartao" id="i365"></div>';
+    const info = async msg => {
+      const ind = await base365Ind(), el = $('#i365'); if (!el) return;
+      el.innerHTML = (msg ? '<p><b>' + h(msg) + '</b></p>' : '') + (ind ? '<p class="nota">📚 ' + Number(ind.total || 0).toLocaleString('pt-PT') + ' artigos de ' + ind.marcas.length + ' marcas · Base do PC de ' + h(ddS(ind.geradoEm)) + '. Preços sem IVA: PVP de tabela e líquido (preço de parceiro ou com o desconto da marca).</p><button id="a365">⟳ Atualizar a Base</button>' :
+        '<p>A Base de preços ainda não está neste telemóvel. A primeira vez descarrega cerca de 6 MB — use Wi-Fi. Depois só descarrega as marcas que mudarem.</p><button id="a365">Descarregar a Base</button>');
+      const s = $('#m365'); if (s && ind && s.options.length === 1) { ind.marcas.forEach(x => { const o = document.createElement('option'); o.value = x.m; o.textContent = x.m + ' (' + Number(x.n).toLocaleString('pt-PT') + ')'; s.append(o); }); s.value = procura.m365 || ''; }
+      const b = $('#a365'); if (b) b.onclick = async () => { b.disabled = true; try { const n = await base365Descarregar(true, t => { b.textContent = t; }); await info(n ? n + ' marca(s) descarregada(s).' : 'A Base já estava em dia.'); corre(); } catch (err) { await info('Não foi possível: ' + err.message); } };
+    };
+    const corre = async () => {
+      const q = procura.s365 || '', l = $('#l365'), n = $('#n365'); if (!l) return;
+      if (sem(q).trim().length < 2) { l.innerHTML = ''; n.textContent = ''; return; }
+      n.textContent = 'a procurar…';
+      const r = await base365Procura(q, procura.m365 || ''); if ((procura.s365 || '') !== q || !$('#l365')) return;
+      n.textContent = r.L.length + (r.mais ? '+ (escreva mais letras)' : '') + ' artigo(s)';
+      l.innerHTML = r.L.map(([mc, ln]) => { const [ref, d, pvp, liq, un] = ln.split('\t'); const e = v => v ? eur(Number(v)) : '—';
+        return '<li><div class="t">' + h(d) + '</div><div class="s"><b>' + h(mc) + '</b> · ' + h(ref) + (un ? ' · ' + h(un) : '') + '<br>PVP ' + e(pvp) + ' · <b>líquido ' + e(liq) + '</b></div></li>'; }).join('') || '<li>Nenhum artigo com estas letras.</li>';
+    };
+    const q = $('#q365'); q.oninput = () => { procura.s365 = q.value; clearTimeout(q._t); q._t = setTimeout(corre, 300); };
+    $('#m365').onchange = e => { procura.m365 = e.target.value; corre(); };
+    info(''); corre();
+    if (B365.ind !== undefined && Date.now() - B365.tent > 30 * 60 * 1000) { B365.tent = Date.now(); base365Ind().then(ind => ind && base365Descarregar(false).then(n => { if (n) { info(n + ' marca(s) atualizada(s).'); corre(); } })).catch(() => { }); }
+  }
   function vStock(m) {
+    if (procura.base365) return vBase365(m);   // v365
     const L0 = D.stockV341, cab = topo();
     m.onclick = e => { if (e.target.closest('[data-mais]')) { procura.lim = (procura.lim || 150) + 150; return vStock(m); } const li = e.target.closest('li[data-i]'); if (li) abrirStock(L0[+li.dataset.i]); };
-    if (!Array.isArray(L0)) { m.innerHTML = cab + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 343 e carregue em ⟳ Atualizar.</p></div>'; return; }
+    if (!Array.isArray(L0)) { m.innerHTML = cab + MOD365() + '<div class="cartao"><h2>Stock</h2><p>O ficheiro do PC ainda não traz o stock: instale no PC a versão 343 e carregue em ⟳ Atualizar.</p></div>'; return; }
     L0.forEach((x, i) => { x._i = i; });
     const ps = sem(procura.s || '').split(/\s+/).filter(Boolean), ord = procura.ord || 'barato';
     let L = ps.length ? L0.filter(x => { const w = x._w || (x._w = sem([x.d, x.c, x.f, x.mc || '', ...(x.fs || []).map(f => f.f)].join(' ')).split(/[^a-z0-9]+/).filter(Boolean)); return ps.every(p => w.some(z => z.startsWith(p))); }) : L0.slice();
@@ -1241,7 +1319,7 @@
     const O = { barato: (a, b) => pb(a) - pb(b), caro: (a, b) => (b.p ?? -1) - (a.p ?? -1), recente: (a, b) => String(b.dt || '').localeCompare(String(a.dt || '')), antiga: (a, b) => String(a.dt || '9').localeCompare(String(b.dt || '9')), nome: (a, b) => String(a.d).localeCompare(String(b.d), 'pt') };
     L.sort(O[ord] || O.barato);
     const lim = procura.lim || 150;
-    m.innerHTML = cab + '<input type="search" id="q" placeholder="Procurar: primeiras letras (ex.: «contac 2na»)" value="' + h(procura.s || '') + '">' +
+    m.innerHTML = cab + MOD365() + '<input type="search" id="q" placeholder="Procurar: primeiras letras (ex.: «contac 2na»)" value="' + h(procura.s || '') + '">' +
       '<p class="nota" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select id="ord343">' + [['barato', 'Mais barato primeiro'], ['caro', 'Mais caro primeiro'], ['recente', 'Compra mais recente'], ['antiga', 'Compra mais antiga'], ['nome', 'Nome']].map(([k, t]) => '<option value="' + k + '"' + (k === ord ? ' selected' : '') + '>' + t + '</option>').join('') + '</select>' +
       '<label><input type="checkbox" id="so341"' + (procura.so ? ' checked' : '') + '> Só o que tenho em stock</label> · ' + L.length + ' artigo(s)</p><ul class="lista">' +
       L.slice(0, lim).map(x => { const fs = x.fs || [], b = fs[0]; return '<li class="toque" data-i="' + x._i + '"><div class="t" style="display:flex;justify-content:space-between;gap:8px"><span>' + h(x.d) + '</span><b style="white-space:nowrap;color:' + (Number(x.q) > 0 ? '#1b7a3d' : '#888') + '">' + qt(x.q) + ' ' + h(x.u || '') + '</b></div><div class="s">' +
